@@ -4,7 +4,10 @@ from core import Simulation, Event, StopSimulation
 from statistics import TimeWeightedStatistic, SampleStatistic, Counter
 from distributions import Sequence
 
-
+bid_queue = []
+ask_queue = []
+count = 0
+random.seed(42)
 
 class Limit_order:
     def __init__(self, order, ba, price, arrival_time):
@@ -20,23 +23,38 @@ def arrival(n):
     return 15 * ((1 + math.sin(n * math.pi / 12)) ** 2) + 2
 
 def limit_price(n):
-    return 100 + 2 * math.sin(n * math.e), 2
+    return round(100 + 2 * math.sin(n * math.e), 2)
 
 def cancellation(n, t):
     return 30 * (1 + math.cos(n) ** 2) + t
 
-    class LOB:
+class LOB:
     def __init__(self):
+        self.time = SampleStatistic()
+        self.cancel_counter = Counter()
+        self.limit_counter = Counter()
+        self.cancellation_rate = 0 #rate=cancel counter/limit counter
+        self.spread = 0
 
+    def ba(self):
+        if random.random():#do to 0.5 prob
+            ba = "bid"
+        else:
+            ba = "ask"
+
+        if ba == "bid":
+            bid_queue.append(#order)
+        else:
+            ask_queue.append(#order)
 
     def best_bid(self):
-
+        return max(#bid queue, #price?)
 
     def best_ask(self):
-
+        return min(#ask queue,  # price?)
 
     def queue_status(self, t):
-
+        #self.bid.update(t,bid queue)
 
     def spread_status(self, t):
 
@@ -44,10 +62,15 @@ def cancellation(n, t):
     def matching(self, sim):
 
 
+def simulation():
+    sim = Simulation()
+    sim.schedule()
+    sim.run()
+    return sim
+
+
 if __name__ == "__main__":
     simulation()
 
-
-
-
-
+    total_limit = limit_counter.value
+    cancelled = cancel_counter.value
