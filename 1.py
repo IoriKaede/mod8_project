@@ -36,8 +36,9 @@ class LOB:
         self.cancellation_rate = 0 #rate=cancel counter/limit counter
         self.spread = 0
 
+
     def ba(self):
-        if random.random():#do to 0.5 prob
+        if random.random()<0.5:#do to 0.5 prob
             ba = "bid"
         else:
             ba = "ask"
@@ -47,30 +48,70 @@ class LOB:
         else:
             ask_queue.append(#order)
 
+    def length(self):
+        self.bid_length = TimeWeightedStatistic()
+        self.ask_length = TimeWeightedStatistic()
+
     def best_bid(self):
-        return max(#bid queue, #price?)
+        return max(bid_queue,key=lambda order: order.price)
 
     def best_ask(self):
-        return min(#ask queue,  # price?)
+        return min(ask_queue, key=lambda order: order.price)
 
     def queue_status(self, t):
-        #self.bid.update(t,bid queue)
+        self.bid_length.update(t,len(bid_queue))
+        self.ask_length.update(t, len(ask_queue))
 
     def spread_status(self, t):
-
+        #spread
 
     def matching(self, sim):
+        global count
+        bestb = self.best_bid()
+        besta = self.best_ask()
+        t = sim.current_time
+        #self.spread_status(t)
+        bid_queue.remove(bestb)
+        ask_queue.remove(besta)
+        sim.cancel(bestb.cancel_event)
+        sim.cancel(besta.cancel_event)
+        bestb.matched = True
+        besta.matched = True
+        bestb.status = "matched"
+        besta.status = "matched"
+        self.time.record(t - bestb.arrival_time)
+        self.time.record(t - besta.arrival_time)
+        self.queue_status(t)
+        self.spread_status(t)
+        count += 1
+        if count >= 500:
+            sim.stop()
+            return t
+
+
+class arrival(event):
+    def __init__(self):
+
+
+
+class cancel(event):
+    def __init__(self):
+
+
+
+
 
 
 def simulation():
+    lob = LOB()
     sim = Simulation()
     sim.schedule()
     sim.run()
-    return sim
+    return lob, sim
 
 
 if __name__ == "__main__":
     simulation()
 
-    total_limit = limit_counter.value
-    cancelled = cancel_counter.value
+    total_limit = LOB.limit_counter.value
+    cancelled = LOB.cancel_counter.value
