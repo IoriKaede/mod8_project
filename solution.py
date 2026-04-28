@@ -63,7 +63,12 @@ class LOB:
         self.ask_length.update(t, len(ask_queue))
 
     def spread_status(self, t):
-        #spread
+        spread = {}
+        if self.ask_length == 0 or self.bid_length == 0:
+            pass
+        else:
+            spread[t] = (best_bid(self) + max(ask_queue)) / 2
+        return spread
 
     def matching(self, sim):
         global count
