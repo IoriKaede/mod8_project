@@ -9,6 +9,7 @@ ask_queue = []
 count = 0
 random.seed(42)
 
+
 class Limit_order:
     def __init__(self, order, ba, price, arrival_time):
         self.order = order
@@ -18,6 +19,7 @@ class Limit_order:
         self.arrival_time = arrival_time
         self.matched = False
         self.cancelled = False
+        self.cancel_event = None
 
 def arrival(n):
     return 15 * ((1 + math.sin(n * math.pi / 12)) ** 2) + 2
@@ -33,34 +35,13 @@ class LOB:
         self.time = SampleStatistic()
         self.cancel_counter = Counter()
         self.limit_counter = Counter()
-        self.cancellation_rate = 0 #rate=cancel counter/limit counter
         self.spread = 0
+        self.length()
 
-
-    def ba(self):
-        if random.random()<0.5:#do to 0.5 prob
-            ba = "bid"
-        else:
-            ba = "ask"
-
-        if ba == "bid":
-            bid_queue.append(#order)
-        else:
-            ask_queue.append(#order)
-
-    def length(self):
-        self.bid_length = TimeWeightedStatistic()
-        self.ask_length = TimeWeightedStatistic()
-
-    def best_bid(self):
-        return max(bid_queue,key=lambda order: order.price)
-
-    def best_ask(self):
-        return min(ask_queue, key=lambda order: order.price)
-
-    def queue_status(self, t):
-        self.bid_length.update(t,len(bid_queue))
-        self.ask_length.update(t, len(ask_queue))
+        self.spread= 0
+        self.spread_last_time = 0
+        self.spread_boolean=True
+        self.spread_integral = 0
 
     def spread_status(self, t):
         ba = self.best_ask()
@@ -73,40 +54,122 @@ class LOB:
         return spread
 
     def matching(self, sim):
-        global count
-        bestb = self.best_bid()
-        besta = self.best_ask()
+        global count, T
+        while True:
+            bestb = self.best_bid()
+            besta = self.best_ask()
+            if bestb >=besta:
+                t = sim.current_time
+                self.spread_status(t)
+                bid_queue.remove(bestb)
+                ask_queue.remove(besta)
+                sim.cancel(bestb.cancel_event)
+                sim.cancel(besta.cancel_event)
+                bestb.matched = True
+                besta.matched = True
+                bestb.status = "matched"
+                besta.status = "matched"
+                self.time.record(t - bestb.arrival_time)
+                self.time.record(t - besta.arrival_time)
+                self.queue_status(t)
+                self.spread_status(t)
+                count += 1
+            if count >= 500:
+                T = t
+                sim.stop()
+
+class event_arrival(Event):
+    def __init__(self,n,time,lob):
+        self.time=time
+        self.cancelled = False
+        self.n=n
+        self.lob=lob
+
+    def arrive(self, sim):
+        global count, T
         t = sim.current_time
-        #self.spread_status(t)
-        bid_queue.remove(bestb)
-        ask_queue.remove(besta)
-        sim.cancel(bestb.cancel_event)
-        sim.cancel(besta.cancel_event)
-        bestb.matched = True
-        besta.matched = True
-        bestb.status = "matched"
-        besta.status = "matched"
-        self.time.record(t - bestb.arrival_time)
-        self.time.record(t - besta.arrival_time)
-        self.queue_status(t)
-        self.spread_status(t)
-        count += 1
-        if count >= 500:
-            sim.stop()
-            return t
+        lob=self.lob
+        n = self.n
+        if random.random() < 0.7:
+            if random.random() < 0.5:
+                ba = "bid"
+            else:
+                ba = "ask"
+            price = limit_price(n)
+
+            order = Limit_order(order=n, ba=ba, price=price, arrival_time=t)
+            #maybe need to enumerate lob.limit_counter?
+            lob.spread_status(t)
+            lob.ba(order)
+            lob.queue_status(t)
+            lob.spread_status(t)
+
+            cancel_time = cancellation(n, t)
+            cancel_event = event_cancel.cancel()
+            sim.schedule(cancel_event)
+            order.cancel_event = cancel_event
+        else:
+            if random.random() < 0.5:
+                ba = "bid"
+                opposite = lob.best_ask()
+            else:
+                ba = "ask"
+                opposite = lob.best_bid()
+            lob.spread_status(t)
+
+            if opposite.binary == "bid":
+                bid_queue.remove(opposite)
+            else:
+                ask_queue.remove(opposite)
+            sim.cancel(opposite.cancel_event)
+            opposite.matched = True
+            opposite.status = "matched"
+            lob.time.record(t - opposite.arrival_time)
+            lob.queue_status(t)
+            lob.spread_status(t)
+
+            count += 1
+
+            if count >= 500:
+                T = t
+                sim.stop()
+                return
+
+        if count < 500:
+            lob.matching(sim)
+            sim.schedule(arrival(n=n+1, time=t+arrival(n), lob=lob))
 
 
-class arrival(event):
-    def __init__(self):
+class event_cancel(Event):
+    def __init__(self, order, time, lob):
+        self.time = time
+        self.cancelled = False
+        self.order = order
+        self.lob = lob
 
+    def cancel(self,sim):
+        global count, T
+        t = sim.current_time
+        lob = self.lob
+        order = self.order
 
+        if order.matched:
+            return
 
-class cancel(event):
-    def __init__(self):
+        lob.spread_status(t)
 
+        if order.binary == "bid":
+            bid_queue.remove(order)
+        else:
+            ask_queue.remove(order)
 
+        order.cancelled = True
+        order.status = "cancelled"
+        lob.cancel_counter+=1
 
-
+        lob.queue_status(t)
+        lob.spread_status(t)
+        lob.matching(sim)
 
 
 def simulation():
