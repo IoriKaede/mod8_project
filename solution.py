@@ -43,6 +43,27 @@ class LOB:
         self.spread_boolean=True
         self.spread_integral = 0
 
+
+    def ba(self, order):
+        if order.binary == "bid":
+            bid_queue.append(order)
+        else:
+            ask_queue.append(order)
+
+    def length(self):
+        self.bid_length = TimeWeightedStatistic()
+        self.ask_length = TimeWeightedStatistic()
+
+    def best_bid(self):
+        return max(bid_queue,key=lambda order: order.price)
+
+    def best_ask(self):
+        return min(ask_queue, key=lambda order: order.price)
+
+    def queue_status(self, t):
+        self.bid_length.update(t,len(bid_queue))
+        self.ask_length.update(t, len(ask_queue))
+
     def spread_status(self, t):
         ba = self.best_ask()
         bb = self.best_bid()
