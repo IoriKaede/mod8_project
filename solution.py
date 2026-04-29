@@ -51,13 +51,17 @@ class LOB:
             ask_queue.append(order)
 
     def length(self):
-        self.bid_length = TimeWeightedStatistic()
-        self.ask_length = TimeWeightedStatistic()
+        self.bid_length = TimeWeightedStatistic(initial_value=0.0, start_time=0.0) #need initial value
+        self.ask_length = TimeWeightedStatistic(initial_value=0.0, start_time=0.0)
 
     def best_bid(self):
+        if not bid_queue: #in case it is empty
+            return
         return max(bid_queue,key=lambda order: order.price)
 
     def best_ask(self):
+        if not ask_queue:
+            return
         return min(ask_queue, key=lambda order: order.price)
 
     def queue_status(self, t):
@@ -68,18 +72,18 @@ class LOB:
         ba = self.best_ask()
         bb = self.best_bid()
         spread = {}
-        if self.ask_length == 0 or self.bid_length == 0:
+        if not self.ask_length or not self.bid_length: #for the object is not an integer use not :)
             spread[t] = "a"
         else:
-            spread[t] = ba - bb
+            spread[t] = ba.price - bb.price  #subtract the price of best ba not themselves
         return spread
 
     def matching(self, sim):
         global count, T
-        while True:
+        while bid_queue and ask_queue:
             bestb = self.best_bid()
             besta = self.best_ask()
-            if bestb >=besta:
+            if bestb.price >=besta.price:
                 t = sim.current_time
                 self.spread_status(t)
                 bid_queue.remove(bestb)
@@ -95,9 +99,10 @@ class LOB:
                 self.queue_status(t)
                 self.spread_status(t)
                 count += 1
-            if count >= 500:
-                T = t
-                sim.stop()
+                if count >= 500:
+                    T = t
+                    sim.stop()
+                    return  #use this to stop the function but not returning anything
 
 class event_arrival(Event):
     def __init__(self,n,time,lob):
@@ -106,7 +111,7 @@ class event_arrival(Event):
         self.n=n
         self.lob=lob
 
-    def arrive(self, sim):
+    def execute(self, sim):   #I just found that the library could only call event.execute()
         global count, T
         t = sim.current_time
         lob=self.lob
@@ -119,14 +124,17 @@ class event_arrival(Event):
             price = limit_price(n)
 
             order = Limit_order(order=n, ba=ba, price=price, arrival_time=t)
-            #maybe need to enumerate lob.limit_counter?
+
+            lob.limit_counter.increment() #I hope this increment will work(hope/ cannot use + because it is object
+
+
             lob.spread_status(t)
             lob.ba(order)
             lob.queue_status(t)
             lob.spread_status(t)
 
             cancel_time = cancellation(n, t)
-            cancel_event = event_cancel.cancel()
+            cancel_event = event_cancel(order,cancel_time,lob)
             sim.schedule(cancel_event)
             order.cancel_event = cancel_event
         else:
@@ -136,29 +144,30 @@ class event_arrival(Event):
             else:
                 ba = "ask"
                 opposite = lob.best_bid()
-            lob.spread_status(t)
 
-            if opposite.binary == "bid":
-                bid_queue.remove(opposite)
-            else:
-                ask_queue.remove(opposite)
-            sim.cancel(opposite.cancel_event)
-            opposite.matched = True
-            opposite.status = "matched"
-            lob.time.record(t - opposite.arrival_time)
-            lob.queue_status(t)
-            lob.spread_status(t)
+            if opposite is not None: #in case the market order come without a bb/ba exist
+                lob.spread_status(t)
 
-            count += 1
+                if opposite.binary == "bid":
+                    bid_queue.remove(opposite)
+                else:
+                    ask_queue.remove(opposite)
+                sim.cancel(opposite.cancel_event)
+                opposite.matched = True
+                opposite.status = "matched"
+                lob.time.record(t - opposite.arrival_time)
+                lob.queue_status(t)
+                lob.spread_status(t)
 
-            if count >= 500:
-                T = t
-                sim.stop()
-                return
+                count += 1
 
-        if count < 500:
-            lob.matching(sim)
-            sim.schedule(arrival(n=n+1, time=t+arrival(n), lob=lob))
+                if count >= 500:
+                    T = t
+                    sim.stop()
+                    return
+
+            if count < 500:
+                sim.schedule(event_arrival(n+1, t+arrival(n), lob)) # schedule for next arrival but arrival is returning a float not class
 
 
 class event_cancel(Event):
@@ -168,7 +177,7 @@ class event_cancel(Event):
         self.order = order
         self.lob = lob
 
-    def cancel(self,sim):
+    def execute(self,sim):
         global count, T
         t = sim.current_time
         lob = self.lob
@@ -186,7 +195,7 @@ class event_cancel(Event):
 
         order.cancelled = True
         order.status = "cancelled"
-        lob.cancel_counter+=1
+        lob.cancel_counter.increment()
 
         lob.queue_status(t)
         lob.spread_status(t)
@@ -196,7 +205,7 @@ class event_cancel(Event):
 def simulation():
     lob = LOB()
     sim = Simulation()
-    sim.schedule()
+    sim.schedule(event_arrival(0,0,lob))
     sim.run()
     return lob, sim
 
