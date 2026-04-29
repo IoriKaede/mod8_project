@@ -63,11 +63,13 @@ class LOB:
         self.ask_length.update(t, len(ask_queue))
 
     def spread_status(self, t):
+        ba = self.best_ask()
+        bb = self.best_bid()
         spread = {}
         if self.ask_length == 0 or self.bid_length == 0:
-            pass
+            spread[t] = "a"
         else:
-            spread[t] = (best_bid(self) + max(ask_queue)) / 2
+            spread[t] = ba - bb
         return spread
 
     def matching(self, sim):
@@ -113,6 +115,23 @@ def simulation():
     sim.schedule()
     sim.run()
     return lob, sim
+
+
+def time_avg_spread(spread):
+    a = 0
+    b = 0
+    prevtime = 0
+    for t in spread.keys:
+        if spread[t] == "a":   # updates the time but does not add anything so we are not counting one spred for longer then we should because there was none
+            prevtime = t
+        else:
+            a += (t - prevtime)*spread[t]
+            b +=  (t - prevtime)
+            prevtime = t
+    t_avg_spread = a/b
+    return t_avg_spread
+
+
 
 
 if __name__ == "__main__":
