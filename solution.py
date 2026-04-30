@@ -9,6 +9,8 @@ ask_queue = []
 count = 0
 random.seed(42)
 T = 0
+spread={}
+
 
 class Limit_order:
     def __init__(self, order, ba, price, arrival_time):
@@ -61,7 +63,7 @@ class LOB:
         return max(bid_queue,key=lambda order: order.price)
 
     def best_ask(self):
-        if not ask_queue:
+        if len(ask_queue) == 0:
             return None
         return min(ask_queue, key=lambda order: order.price)
 
@@ -70,14 +72,14 @@ class LOB:
         self.ask_length.update(t, len(ask_queue))
 
     def spread_status(self, t):
+        global spread
         ba = self.best_ask()
         bb = self.best_bid()
-        spread = {}
         if ba is None or bb is None: #for the object is not an integer use not :)
-            spread[t] = None #undefined
+            spread.update({t:None}) #undefined
         else:
-            spread[t] = ba.price - bb.price  #subtract the price of best ba not themselves
-        return spread
+            spread.update({t:ba.price - bb.price}) #subtract the price of best ba not themselves
+        #return spread
 
     def matching(self, sim):
         global count, T
@@ -240,11 +242,8 @@ if __name__ == "__main__":
     total_limit = lob.limit_counter.value
     cancelled = lob.cancel_counter.value
 
-    #avg_spread = time_avg_spread()
-    if lob.spread_total_time > 0:
-        avg_spread = lob.spread_integral / lob.spread_total_time
-    else:
-        avg_spread = 0
+    avg_spread = time_avg_spread(spread)
+
     print(f"T:{T}, total:{total_limit} , matched:{total_limit - cancelled}, cancelled:{cancelled}"
           f"num of trades:{count}, time avg spread{avg_spread}, avg time{lob.time.mean()}, cancellation rate:{lob.cancel_counter.fraction(total_limit)}"
           f"avg bid queue length{lob.bid_length.mean(T)}, ask:{lob.ask_length.mean(T)}")
