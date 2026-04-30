@@ -79,26 +79,6 @@ class LOB:
             spread[t] = ba.price - bb.price  #subtract the price of best ba not themselves
         return spread
 
-    def spread_object(self, t):  #same thing as above but make track of time
-        ba = self.best_ask()
-        bb = self.best_bid()
-
-        if self.spread_check:
-            dt = t - self.spread_last_time
-            self.spread_integral += self.spread_last_value*dt #the area under line
-            self.spread_total_time += dt
-            self.spread_last_time = t
-
-        if ba is None or bb is None:
-            self.spread_check = False
-        else:
-            self.spread = ba.price - bb.price
-            self.spread_last_value = self.spread
-            self.spread_last_time = t
-            self.spread_check = True
-
-
-
     def matching(self, sim):
         global count, T
         while bid_queue and ask_queue:
@@ -106,7 +86,7 @@ class LOB:
             besta = self.best_ask()
             if bestb.price >=besta.price:
                 t = sim.current_time
-                self.spread_object(t)
+                self.spread_status(t)
                 bid_queue.remove(bestb)
                 ask_queue.remove(besta)
                 sim.cancel(bestb.cancel_event)
@@ -118,7 +98,7 @@ class LOB:
                 self.time.record(t - bestb.arrival_time)
                 self.time.record(t - besta.arrival_time)
                 self.queue_status(t)
-                self.spread_object(t)
+                self.spread_status(t)
                 count += 1
                 if count >= 500:
                     T = t
@@ -152,10 +132,10 @@ class event_arrival(Event):
             lob.limit_counter.increment() #I hope this increment will work(hope/ cannot use + because it is object
 
 
-            lob.spread_object(t)
+            lob.spread_status(t)
             lob.ba(order)
             lob.queue_status(t)
-            lob.spread_object(t)
+            lob.spread_status(t)
 
             cancel_time = cancellation(n, t)
             cancel_event = event_cancel(order,cancel_time,lob)
@@ -170,7 +150,7 @@ class event_arrival(Event):
                 opposite = lob.best_bid()
 
             if opposite is not None: #in case the market order come without a bb/ba exist
-                lob.spread_object(t)
+                lob.spread_status(t)
 
                 if opposite.binary == "bid":
                     bid_queue.remove(opposite)
@@ -181,7 +161,7 @@ class event_arrival(Event):
                 opposite.status = "matched"
                 lob.time.record(t - opposite.arrival_time)
                 lob.queue_status(t)
-                lob.spread_object(t)
+                lob.spread_status(t)
 
                 count += 1
 
@@ -212,7 +192,7 @@ class event_cancel(Event):
         if order.matched:
             return
 
-        lob.spread_object(t)
+        lob.spread_status(t)
 
         if order.binary == "bid":
             bid_queue.remove(order)
@@ -224,7 +204,7 @@ class event_cancel(Event):
         lob.cancel_counter.increment()
 
         lob.queue_status(t)
-        lob.spread_object(t)
+        lob.spread_status(t)
         lob.matching(sim)
 
 
