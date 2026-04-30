@@ -24,7 +24,7 @@ class Limit_order:
         self.cancel_event = None
 
 def arrival(n):
-    return 15 * ((1 + math.sin(n * math.pi / 12)) ** 2) + 2
+    return 5 * (1 + abs(math.sin(n * math.pi / 3)) )
 
 def limit_price(n):
     return round(100 + 2 * math.sin(n * math.e), 2)
@@ -37,15 +37,7 @@ class LOB:
         self.time = SampleStatistic()
         self.cancel_counter = Counter()
         self.limit_counter = Counter()
-        self.spread = 0
         self.length()
-
-        self.spread_last_time = 0
-        self.spread_check=False
-        self.spread_integral = 0
-        self.spread_last_value =0
-        self.spread_total_time = 0
-
 
     def ba(self, order):
         if order.binary == "bid":
