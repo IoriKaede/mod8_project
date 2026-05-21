@@ -1,15 +1,16 @@
-from asyncio import current_task
+
 
 import numpy as np
 import math
 import random
+
+from debugpy.common.timestamp import current
 
 from core import Simulation, Event
 from statistics import TimeWeightedStatistic, SampleStatistic, Counter
 from distributions import Exponential, Erlang
 
 
-x = np.random.exponential(scale=...)
 
 #Arrival rates: λ1 = λ2 = λ3 = 0.4
 # Waste type probabilities: q1 = q2 = 1/3
@@ -19,7 +20,7 @@ x = np.random.exponential(scale=...)
 # Friendliness: p = 0.5
 # Rerouting threshold: K = 5
 #metrics:Waiting time.Queue length.Truck utilisation.
-reroute_count = 0
+#reroute_count = 0
 
 
 l_1 ,l_2 ,l_3 = 0.4, 0.4, 0.4
@@ -55,31 +56,44 @@ def interarrival(la): #lambda, poisson arrival
 
 class UWC:
     def __init__(self,i,N):
-        self.truck = i
-        self.district = i
+
         self.home_district = list(range(1, i + 1)) #range of i also below is
         self.type = 0 #arrival time, waste type
         self.queues = [[] for _ in range(N)]
 
-        self.queue_stat = [TimeWeightedStatistic() for _ in range(self.N)]
 
 
-        self.truck_status = "idle"  #idle,serving_home,serving_foreign/idle, serving
-        self.truck_serving = None  # check if currently serving/current task
+        self.truck_status = ['idle'] * N  #idle,serving_home,serving_foreign/idle, serving
+        self.truck_task = [None] *N  # check if currently serving/current task
         self.counter = 0
         #for rerouting rate self.reroute_count
-        self.district_job = [0]*n
+        self.district_job = [0]* N
+        self.queues = [[] for _ in range(N)]
 
 
+        self.truck_at = [None] * N
+        self.truck_depart = [None] *N
 
+        self.sojourn_stats = [SampleStatistic() for _ in range(N)]
+        self.queue_stat = [TimeWeightedStatistic() for _ in range(N)]
+        self.serving_stat = [TimeWeightedStatistic() for _ in range(N)]
 
+        self.reroute_count = Counter()
 
-    def arrival(self, current_time ,sim, l):
+        self.reg_cycles = []  # list of completed cycle dicts
+        self.cycle_start = 0  # when the current cycle start
+        self.cycle_sojourn = 0  # sojourn accumulated in current cycle
+        self.cycle_count = 0  # completions in current cycle
+        self._new_cycle = False  # bollean a new cycle just closed?
+
+        self.sim = Simulation()
+
+    def arrival(self, district, current_time ,sim):
         i = self.district
-        queue = self.queues
+        #queue = self.queues
 
         #schedule next arrival = t+exp(λi)
-        next_time = interarrival(l)
+        #next_time = interarrival(l)
 
         #arrival(time) to some distinct
         rd = np.random.uniform()
@@ -90,20 +104,21 @@ class UWC:
         else:
             self.type = 3
 
-        type = self.type
-        record = (current_time, type)  # (arrival_time, type)
+        waste_type = self.type
+        record = (current_time, waste_type)  # (arrival_time, type)
         self.queues[i].append(record)
         self.district_job[i] += 1
         self.queue_stat[i].update(current_time, self.district_job[i])
 
-        truck = self.district
-        next_arrival_time = current_time + next_time
+        #truck = district
+        #next_arrival_time = current_time + next_time
         if self.truck_status =="idle":
-            service(truck=i, district=i)
-            self.routing(truck, current_time)
-        elif self.truck_status =="serving foreign":
+            self.routing(district, current_time)
+        elif self.truck_status =="serving" and self.truck_at[district] !=district:
             #rerouting(,,)
             #check rerouting condition
+            if K < len(self.queues[district]):
+                sim.schedule(Rerouting_Event(current_time, district, self))
 
 
 
@@ -115,83 +130,160 @@ class UWC:
         else:
             return Exponential(mu_3)
 
-    def routing(self,i,p):
+    def routing(self,truck,current_time):
         #check home queue
-        queue = self.queues[i]
-        if queue is not []:
-            truck_current_assignment = queue[0]
-            #service(truck, region)
+        home = truck
+        #queue = self.queues[i]
+        foreign_districts = [a for a in range(1, N)]
+        if len(self.queues[home]) > 0:
+            self.service(truck, home, current_time)
             return
+
         else:
-            if self.truck_status ="idle":
-            for i in range(3):
-                if queue[i] is not []:
-                    if np.random.random() < p:
-                        #assign the truck to forign region
-                        self.truck_status = "serving foreign"
-                    else:
-                        pass
+            for fd in foreign_districts:
+                if len(self.queues[fd]) > 0:
+                    if np.random.uniform() < p:
+                        self.service(truck, fd, current_time)
+                        return
 
             # iterate foreign districts in cyclic order, each with Bernoulli(p) trial
 
 
-    def rerouting(self,district,home):
-        K = len(self.district_job)
-        queue = self.queues[district]
-        home_queue = self.queues[truck]
-        if K>5:
-            #send the truck to its home
-            self.truck_status = "serving local"
-            queue.insert(0,self.truck_serving)
-            #return the tasks to the queue of region
-            self.truck_serving = home_queue[0]
+    def rerouting(self, truck, current_time, sim):
+        if self.truck_status[truck] == 'idle':
+            return
+        if self.truck_at[truck] == truck:   # stop when truck is already at home district
+            return
+        foreign_district = self.truck_at[truck]    # where truck was serving
+        interrupted_task = self.truck_task[truck]   # what it was in the middle of
+
+        if self.truck_depart[truck] is not None:
+            sim.cancel(self.truck_depart[truck])
+
+        self.queues[foreign_district].insert(0, interrupted_task)
+
+        self.serving_stat[truck].update(current_time, 0)  # 0=idle
+        self.truck_status[truck] = 'idle'
+        self.truck_at[truck] = None
+        self.truck_task[truck] = None
+        self.truck_depart[truck] = None
+
+        self.routing(truck, current_time)
+        self.reroute_count.increment()
 
 
-
-
-
-
-
-
-
-        #truck=i, request being reshcdule
 
         #for pending departure for truck i, vaild? +counter
-        #put interrupted request to head of foreign queue[j]
         # send truck i to home distinct and service(truck=i, district=i)
         #increment reroute_count
     
-    def service(self,truck, district,time):
-        i = truck
-        queue = self.queues[district]
-        st = service_time()
-        ending_time = time+st
+    def service(self,truck, district,current_time):
+        current_task = self.queues[district].pop(0)
+        self.truck_status[truck] = 'serving'
+        self.truck_at[truck] = district
+        self.truck_task[truck] = current_task
+        self.serving_stat[truck].update(current_time, 1)  # 1 = serving
+        service_time = self.service_time(current_task[1])  # current_task[1] = waste_type
 
-
-
-        time = ending_time
-        queue.remove()
-
-
-
-
+        depart = Departure_Event(current_time + service_time, truck, district, current_task, self)
+        self.truck_depart[truck] = depart
+        self.sim.schedule(depart)
 
         #truck, district
-        #from queues[district] do requests?
         #random service time S from waste-type
         #schedule departure t+S
         #update truck_status
     
-    def departure(self):
-        #trucki, district, request
-        # record sojourn time: W = t - request.arrival_time
-        #routing/service
-        if #no work found:
-            .status = "idle"
+    def departure(self, truck, district, current_task, current_time):
+        sojourn = current_time - current_task[0]  # current_task[0] = arrival_time
+        self.sojourn_stats[district].record(sojourn)
+
+        self.cycle_sojourn += sojourn
+        self.cycle_count += 1
+
+        self.district_job[district] -= 1
+        self.queue_stat[district].update(current_time, self.district_job[district])
 
 
-    def time_pushing(self):
-        #min(timepoint)
+        self.serving_stat[truck].update(current_time, 0)
+        self.truck_status[truck] = 'idle'
+        self.truck_at[truck] = None
+        self.truck_task[truck] = None
+        self.truck_depart[truck] = None
+
+
+
+        self.routing(truck, current_time)
+        #check all idle?
+        self.cycle_check()
+
+
+
+    def cycle_check(self, current_time):
+        all_idle  = all(s == 'idle' for s in self.truck_status)
+        all_empty = all(len(q) == 0 for q in self.queues)
+
+        if all_idle and all_empty:
+            cycle_len = current_time - self.cycle_start
+            if cycle_len > 0:
+                self.reg_cycles.append({
+                    'sojourn' : self.cycle_sojourn,
+                    'count'   : self.cycle_count,
+                    'length'  : cycle_len,
+                })
+                self._new_cycle = True   # tell steady_state to recheck CI
+
+            # Reset for the next cycle
+            self.cycle_start   = current_time
+            self.cycle_sojourn = 0
+            self.cycle_count   = 0
+
+
+
+class Arrival_Event(Event):
+    def __init__(self, time, district, uwc):
+        super().__init__(time)
+        self.district = district
+        self.uwc      = uwc
+
+    def execute(self, sim):
+        current_time = self.time
+        d= self.district
+        self.uwc.arrival(d, current_time, sim)
+
+        next_t = current_time + interarrival(self.uwc.arrival_rates[d])# Schedule the next arrival at this district
+        sim.schedule(Arrival_Event(next_t, d, self.uwc))
+
+
+
+
+
+
+#exexcuting events^^
+class Departure_Event(Event):
+    def __init__(self, time, truck, district, current_task, uwc):
+        super().__init__(time)
+        self.truck = truck
+        self.district = district
+        self.current_task = current_task      # (arrival_time, waste_type)
+        self.uwc = uwc
+
+    def execute(self, sim):
+        if self.cancelled:
+            return
+        self.uwc.departure(self.truck, self.district, self.current_task, self.time)
+
+
+
+class Rerouting_Event(Event):
+    def __init__(self, time, truck, uwc):
+        super().__init__(time)
+        self.truck = truck
+        self.uwc   = uwc
+
+    def execute(self, sim):
+        self.uwc.rerouting(self.truck, self.time, sim)
+
 
 class steady_state:
     def __init__(self):
