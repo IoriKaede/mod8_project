@@ -1,13 +1,13 @@
-
+from itertools import cycle
 
 import numpy as np
 import math
 import random
 
-from debugpy.common.timestamp import current
+from jupyter_client.kernelspec import NATIVE_KERNEL_NAME
 
 from core import Simulation, Event
-from statistics import TimeWeightedStatistic, SampleStatistic, Counter
+from statistics import TimeWeightedStatistic, SampleStatistic, Counter, _t_critical
 from distributions import Exponential, Erlang
 
 
@@ -87,6 +87,9 @@ class UWC:
         self._new_cycle = False  # bollean a new cycle just closed?
 
         self.sim = Simulation()
+
+        self.batch = []
+
 
     def arrival(self, district, current_time ,sim):
         i = self.district
@@ -286,6 +289,111 @@ class Rerouting_Event(Event):
 
 
 class steady_state:
-    def __init__(self):
-
+    def __init__(self,uwc):
+        self.uwc = uwc
+        self.recording_batch = False  #check if inside a batch
+        self.batch_sojourn = [0] *N
+        self.batch_count = [0] * N
+        self.batch_mean = []  # one overall batch mean per batch
+        self.batch_district = [[] for _ in range(N)]
     #Regenerative method/Batch means method
+
+    def critical_t(self):
+        t =_t_critical(0.95, df)
+
+
+
+    def confidence_interval_reg(self):
+
+        cycles = self.uwc.reg_cycles #(sojurn, count, lenth)
+        n = len(cycles)
+
+        for c in cycles:
+            W_total += c["sojourn"]
+            M += c["count"]
+
+        W_hat = W_total/M
+        M_bar = M/n
+        V= []
+        for c in cycles:
+            V.append(c["sojourn"]-W_hat*c["count"])
+        V_bar = sum(N)/n
+        V_var = sum((n_k - N_bar)**2 for n_k in N)/(n-1)
+
+        ci = self.critical_t(n-1)*((V_var/(n*(M_bar**2))))**0.5
+
+        return W_hat, W_hat-ci, W_hat +ci
+
+
+
+    def regenerative(self):
+        #call the arrival
+        for i in range(N):
+            self.uwc.sim.schedele(Arrival_Event(0,i,self.uwc))
+
+        #self.uwc._new_cycle
+
+        CIs = confidence_interval_reg()
+
+
+
+    #stop condition
+
+    #run simulation
+        self.uwc.sim.run(stop())
+
+
+    def confidence_interval_batch(self, r):
+        n = len(r)
+        L_bar = sum(r) / n
+        r_var = sum((x - L_bar) ** 2 for x in r) / (n - 1)
+        ci = self.critical_t(n - 1) * ((r_var/n)**0.5)
+        return L_bar, L_bar - ci, L_bar + ci
+
+
+    def batch_mean(self):
+        cycles = self.uwc.reg_cycles
+        mean =sum(c["length"] for c in cycles)/len(cycles)
+
+        batch_length = mean
+        num_batchs = len(cycles) / batch_length
+        warm_up = batch_length*0.5
+
+        sim_warmup = self.uwc.current_time + warm_up
+        #stop condition
+        self.uwc.sim.run(stop at warm up)
+        #start single batch, ↑ cut warm up, ↓
+        for b in range(num_batchs):
+            self.batch_sojourn = [0]*N
+            self.batch_count =[0]*N
+            self.recording_batch = True
+
+            batch_end = self.current_time + batch_length
+            self.uwc.sim.run(stop at batch end)
+
+            self.recording_batch = False
+
+
+            total_s = sum(self.batch_sojourn)
+            total_c = sum(self.batch_count)
+            self.batch_mean.append(total_s / total_c)
+
+            for i in range(N):
+                if self.batch_count[i] > 0:
+                    self.batch_district[i].append(self.batch_sojourn[i] / self.batch_count[i])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
