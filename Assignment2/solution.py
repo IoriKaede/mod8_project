@@ -58,7 +58,7 @@ class UWC:
     def __init__(self,i,N):
 
         self.home_district = list(range(1, i + 1)) #range of i also below is
-        self.type = 0 #arrival time, waste type
+        self.type = 0 #arrival time, waste type/last drawn
         self.queues = [[] for _ in range(N)]
 
 
@@ -88,11 +88,13 @@ class UWC:
 
         self.sim = Simulation()
 
-        self.batch = []
+        self.recording_batch = False
+        self.batch_sojourn = [0]*N
+        self.batch_count = [0] * N
 
 
     def arrival(self, district, current_time ,sim):
-        i = self.district
+        #i = self.district
         #queue = self.queues
 
         #schedule next arrival = t+exp(λi)
@@ -109,11 +111,11 @@ class UWC:
 
         waste_type = self.type
         record = (current_time, waste_type)  # (arrival_time, type)
-        self.queues[i].append(record)
-        self.district_job[i] += 1
-        self.queue_stat[i].update(current_time, self.district_job[i])
+        self.queues[district].append(record)
+        self.district_job[district] += 1
+        self.queue_stat[district].update(current_time, self.district_job[i])
 
-        #truck = district
+        truck = district
         #next_arrival_time = current_time + next_time
         if self.truck_status =="idle":
             self.routing(district, current_time)
@@ -125,10 +127,10 @@ class UWC:
 
 
 
-    def service_time(self):
-        if self.type ==1:
+    def service_time(self, type):
+        if type ==1:
             return Erlang(k_1,mu_1)
-        elif self.type ==2:
+        elif type ==2:
             return Erlang(k_2,mu_2)
         else:
             return Exponential(mu_3)
@@ -138,16 +140,11 @@ class UWC:
         home = truck
         #queue = self.queues[i]
         foreign_districts = [a for a in range(1, N)]
-        if len(self.queues[home]) > 0:
-            self.service(truck, home, current_time)
-            return
-
-        else:
-            for fd in foreign_districts:
-                if len(self.queues[fd]) > 0:
-                    if np.random.uniform() < p:
-                        self.service(truck, fd, current_time)
-                        return
+        for fd in foreign_districts:
+            if len(self.queues[fd]) > 0:
+                if np.random.uniform() < p:
+                    self.service(truck, fd, current_time)
+                    return
 
             # iterate foreign districts in cyclic order, each with Bernoulli(p) trial
 
@@ -161,9 +158,9 @@ class UWC:
         interrupted_task = self.truck_task[truck]   # what it was in the middle of
 
         if self.truck_depart[truck] is not None:
-            sim.cancel(self.truck_depart[truck])
+            sim.cancel(self.truck_depart[truck])#cancel departure
 
-        self.queues[foreign_district].insert(0, interrupted_task)
+        self.queues[foreign_district].insert(0, interrupted_task)#interruptted task to the 0of queue
 
         self.serving_stat[truck].update(current_time, 0)  # 0=idle
         self.truck_status[truck] = 'idle'
@@ -172,12 +169,8 @@ class UWC:
         self.truck_depart[truck] = None
 
         self.routing(truck, current_time)
+
         self.reroute_count.increment()
-
-
-
-        #for pending departure for truck i, vaild? +counter
-        # send truck i to home distinct and service(truck=i, district=i)
         #increment reroute_count
     
     def service(self,truck, district,current_time):
@@ -218,8 +211,15 @@ class UWC:
 
         self.routing(truck, current_time)
         #check all idle?
-        self.cycle_check()
+        self.cycle_check(current_time)
 
+        #if self.steady_state.recording_batch:
+        #    self.steady_state.batch_sojourn[district]+=sojourn
+        #    self.steady_state.batch_count[district]+= 1
+
+        if self.recording_batch:
+            self.batch_sojourn[district] += sojourn
+            self.batch_count[district] += 1
 
 
     def cycle_check(self, current_time):
@@ -243,6 +243,7 @@ class UWC:
 
 
 
+
 class Arrival_Event(Event):
     def __init__(self, time, district, uwc):
         super().__init__(time)
@@ -258,11 +259,6 @@ class Arrival_Event(Event):
         sim.schedule(Arrival_Event(next_t, d, self.uwc))
 
 
-
-
-
-
-#exexcuting events^^
 class Departure_Event(Event):
     def __init__(self, time, truck, district, current_task, uwc):
         super().__init__(time)
@@ -288,17 +284,20 @@ class Rerouting_Event(Event):
         self.uwc.rerouting(self.truck, self.time, sim)
 
 
+
+
+
+
+
+
 class steady_state:
     def __init__(self,uwc):
         self.uwc = uwc
-        self.recording_batch = False  #check if inside a batch
-        self.batch_sojourn = [0] *N
-        self.batch_count = [0] * N
         self.batch_mean = []  # one overall batch mean per batch
         self.batch_district = [[] for _ in range(N)]
     #Regenerative method/Batch means method
 
-    def critical_t(self):
+    def critical_t(self,df):
         t =_t_critical(0.95, df)
 
 
@@ -321,8 +320,8 @@ class steady_state:
         V_var = sum((n_k - N_bar)**2 for n_k in N)/(n-1)
 
         ci = self.critical_t(n-1)*((V_var/(n*(M_bar**2))))**0.5
-
-        return W_hat, W_hat-ci, W_hat +ci
+        result = ci/W_hat #half stop
+        return W_hat, W_hat-ci, W_hat +ci, result
 
 
 
@@ -331,6 +330,7 @@ class steady_state:
         for i in range(N):
             self.uwc.sim.schedele(Arrival_Event(0,i,self.uwc))
 
+        def stop():
         #self.uwc._new_cycle
 
         CIs = confidence_interval_reg()
@@ -348,7 +348,7 @@ class steady_state:
         L_bar = sum(r) / n
         r_var = sum((x - L_bar) ** 2 for x in r) / (n - 1)
         ci = self.critical_t(n - 1) * ((r_var/n)**0.5)
-        return L_bar, L_bar - ci, L_bar + ci
+        return L_bar, L_bar - ci, L_bar + ci,
 
 
     def batch_mean(self):
@@ -361,6 +361,8 @@ class steady_state:
 
         sim_warmup = self.uwc.current_time + warm_up
         #stop condition
+        def stop():
+
         self.uwc.sim.run(stop at warm up)
         #start single batch, ↑ cut warm up, ↓
         for b in range(num_batchs):
