@@ -5,6 +5,7 @@ import math
 import random
 
 from jupyter_client.kernelspec import NATIVE_KERNEL_NAME
+from prompt_toolkit.key_binding.bindings.named_commands import self_insert
 
 from core import Simulation, Event
 from statistics import TimeWeightedStatistic, SampleStatistic, Counter, _t_critical
@@ -55,9 +56,9 @@ def interarrival(la): #lambda, poisson arrival
 
 
 class UWC:
-    def __init__(self,i,N):
+    def __init__(self,N,arrival_rate): #remove i
 
-        self.home_district = list(range(1, i + 1)) #range of i also below is
+        #self.home_district = list(range(1, i + 1)) #range of i also below is
         self.type = 0 #arrival time, waste type/last drawn
         self.queues = [[] for _ in range(N)]
 
@@ -70,7 +71,7 @@ class UWC:
         self.district_job = [0]* N
         self.queues = [[] for _ in range(N)]
 
-
+        self.arrival_rate = arrival_rate
         self.truck_at = [None] * N
         self.truck_depart = [None] *N
 
@@ -255,7 +256,7 @@ class Arrival_Event(Event):
         d= self.district
         self.uwc.arrival(d, current_time, sim)
 
-        next_t = current_time + interarrival(self.uwc.arrival_rates[d])# Schedule the next arrival at this district
+        next_t = current_time + interarrival(self.uwc.arrival_rate[d])# Schedule the next arrival at this district
         sim.schedule(Arrival_Event(next_t, d, self.uwc))
 
 
@@ -307,19 +308,18 @@ class steady_state:
         cycles = self.uwc.reg_cycles #(sojurn, count, lenth)
         n = len(cycles)
 
-        for c in cycles:
-            W_total += c["sojourn"]
-            M += c["count"]
+        W_total = sum(c["sojourn"] for c in cycles)
+        M = sum(c["count"] for c in cycles)
 
         W_hat = W_total/M
         M_bar = M/n
-        V= []
+        N= []
         for c in cycles:
-            V.append(c["sojourn"]-W_hat*c["count"])
-        V_bar = sum(N)/n
-        V_var = sum((n_k - N_bar)**2 for n_k in N)/(n-1)
+            N.append(c["sojourn"]-W_hat*c["count"])
+        N_bar = sum(N)/n
+        N_var = sum((n_k - N_bar)**2 for n_k in N)/(n-1)
 
-        ci = self.critical_t(n-1)*((V_var/(n*(M_bar**2))))**0.5
+        ci = self.critical_t(n-1)*((N_var/(n*(M_bar**2))))**0.5
         result = ci/W_hat #half stop
         return W_hat, W_hat-ci, W_hat +ci, result
 
@@ -328,19 +328,35 @@ class steady_state:
     def regenerative(self):
         #call the arrival
         for i in range(N):
-            self.uwc.sim.schedele(Arrival_Event(0,i,self.uwc))
+            self.uwc.sim.schedule(Arrival_Event(0,i,self.uwc))
 
         def stop():
         #self.uwc._new_cycle
+            if not self.uwc._new_cycle:
+                return False
+            self.uwc._new_cycle = False
+            min_cycles = 10
+            max_cycles = 1000
+            n = len(self.uwc.reg_cycles)
+            if n < min_cycles:
+                return False
+            if n >= max_cycles:
+                return True
 
-        CIs = confidence_interval_reg()
-
+            result = self.confidence_interval_reg()
+            if result is None:
+                return False
+            _, _, _, res = result
+            if res <= 0.1:  #10%
+                return True
+            else:
+                return False
 
 
     #stop condition
 
     #run simulation
-        self.uwc.sim.run(stop())
+        self.uwc.sim.run(stop())  #def run(self, stop_condition: Optional[Callable[["Simulation"], bool]] = None)
 
 
     def confidence_interval_batch(self, r):
@@ -348,22 +364,23 @@ class steady_state:
         L_bar = sum(r) / n
         r_var = sum((x - L_bar) ** 2 for x in r) / (n - 1)
         ci = self.critical_t(n - 1) * ((r_var/n)**0.5)
-        return L_bar, L_bar - ci, L_bar + ci,
+        return L_bar, L_bar - ci, L_bar + ci
 
 
     def batch_mean(self):
         cycles = self.uwc.reg_cycles
-        mean =sum(c["length"] for c in cycles)/len(cycles)
+        mean_cycle =sum(c["length"] for c in cycles)/len(cycles)
 
-        batch_length = mean
-        num_batchs = len(cycles) / batch_length
-        warm_up = batch_length*0.5
-
-        sim_warmup = self.uwc.current_time + warm_up
+        #batch_length = mean
+        #num_batchs = len(cycles) / batch_length
+        num_batchs = 10 #idk but try
+        warm_up = mean_cycle
+        batch_length = mean_cycle *num_batchs
+        warmup_end = self.uwc.current_time + warm_up
         #stop condition
-        def stop():
-
-        self.uwc.sim.run(stop at warm up)
+        def stop_warm():
+            return self.uwc.current_time >= warmup_end
+        self.uwc.sim.run(stop_warm())   #def run(self, stop_condition: Optional[Callable[["Simulation"], bool]] = None)
         #start single batch, ↑ cut warm up, ↓
         for b in range(num_batchs):
             self.batch_sojourn = [0]*N
@@ -371,7 +388,9 @@ class steady_state:
             self.recording_batch = True
 
             batch_end = self.current_time + batch_length
-            self.uwc.sim.run(stop at batch end)
+            def stop_batch():
+                return self.uwc.current_time >= batch_end
+            self.uwc.sim.run(stop_batch())
 
             self.recording_batch = False
 
@@ -387,9 +406,8 @@ class steady_state:
 
 
 
-
-
-
+    def result(self):
+        uwc = self.uwc
 
 
 
