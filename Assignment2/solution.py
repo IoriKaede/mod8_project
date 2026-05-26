@@ -58,6 +58,8 @@ def interarrival(la): #lambda, poisson arrival
 class UWC:
     def __init__(self,N,arrival_rate): #remove i
 
+        self.N = N  #add this to change N later
+
         #self.home_district = list(range(1, i + 1)) #range of i also below is
         self.type = 0 #arrival time, waste type/last drawn
         self.queues = [[] for _ in range(N)]
@@ -114,18 +116,25 @@ class UWC:
         record = (current_time, waste_type)  # (arrival_time, type)
         self.queues[district].append(record)
         self.district_job[district] += 1
-        self.queue_stat[district].update(current_time, self.district_job[i])
+        self.queue_stat[district].update(current_time, self.district_job[district])
 
-        truck = district
+        #truck = district
         #next_arrival_time = current_time + next_time
-        if self.truck_status =="idle":
+        if self.truck_status[district] =="idle":
             self.routing(district, current_time)
-        elif self.truck_status =="serving" and self.truck_at[district] !=district:
+        else:  #should be if busy not elif
+            if (self.truck_status[district] =="serving" and self.truck_at[district] !=district):
             #rerouting(,,)
             #check rerouting condition
-            if K < len(self.queues[district]):
-                sim.schedule(Rerouting_Event(current_time, district, self))
+                if K < len(self.queues[district]):
+                    sim.schedule(Rerouting_Event(current_time, district, self))
 
+            if len(self.queues[district]) == 1: #added see foreign truck ^^
+                for foreign_truck in range(self.N):
+                    if foreign_truck != district and self.truck_status[foreign_truck] == "idle":
+                        if np.random.uniform() < p:
+                            self.service(foreign_truck, district, current_time)
+                            break  #
 
 
     def service_time(self, type):
@@ -138,15 +147,17 @@ class UWC:
 
     def routing(self,truck,current_time):
         #check home queue
-        home = truck
+        if len(self.queues[truck]) > 0:
+            self.service(truck, truck, current_time)
+            return
+        #home = truck
         #queue = self.queues[i]
-        foreign_districts = [a for a in range(1, N)]
+        foreign_districts = [(truck + a) % self.N for a in range(1, self.N)]
         for fd in foreign_districts:
             if len(self.queues[fd]) > 0:
                 if np.random.uniform() < p:
                     self.service(truck, fd, current_time)
                     return
-
             # iterate foreign districts in cyclic order, each with Bernoulli(p) trial
 
 
@@ -249,15 +260,18 @@ class Arrival_Event(Event):
     def __init__(self, time, district, uwc):
         super().__init__(time)
         self.district = district
-        self.uwc      = uwc
+        self.uwc=uwc
 
     def execute(self, sim):
+
         current_time = self.time
         d= self.district
         self.uwc.arrival(d, current_time, sim)
 
-        next_t = current_time + interarrival(self.uwc.arrival_rate[d])# Schedule the next arrival at this district
-        sim.schedule(Arrival_Event(next_t, d, self.uwc))
+        if self.uwc.arrival_rate[d] >0:
+            next_t = current_time + interarrival(self.uwc.arrival_rate[d])# Schedule the next arrival at this district
+            if next_t != current_time:
+                sim.schedule(Arrival_Event(next_t, d, self.uwc))
 
 
 class Departure_Event(Event):
@@ -279,7 +293,7 @@ class Rerouting_Event(Event):
     def __init__(self, time, truck, uwc):
         super().__init__(time)
         self.truck = truck
-        self.uwc   = uwc
+        self.uwc = uwc
 
     def execute(self, sim):
         self.uwc.rerouting(self.truck, self.time, sim)
@@ -300,6 +314,7 @@ class steady_state:
 
     def critical_t(self,df):
         t =_t_critical(0.95, df)
+        return t
 
 
 
@@ -330,7 +345,7 @@ class steady_state:
         for i in range(N):
             self.uwc.sim.schedule(Arrival_Event(0,i,self.uwc))
 
-        def stop():
+        def stop(instance=None):
         #self.uwc._new_cycle
             if not self.uwc._new_cycle:
                 return False
@@ -356,7 +371,7 @@ class steady_state:
     #stop condition
 
     #run simulation
-        self.uwc.sim.run(stop())  #def run(self, stop_condition: Optional[Callable[["Simulation"], bool]] = None)
+        self.uwc.sim.run(stop)  #def run(self, stop_condition: Optional[Callable[["Simulation"], bool]] = None)
 
 
     def confidence_interval_batch(self, r):
@@ -380,39 +395,194 @@ class steady_state:
         #stop condition
         def stop_warm():
             return self.uwc.current_time >= warmup_end
-        self.uwc.sim.run(stop_warm())   #def run(self, stop_condition: Optional[Callable[["Simulation"], bool]] = None)
+        self.uwc.sim.run(stop_warm)   #def run(self, stop_condition: Optional[Callable[["Simulation"], bool]] = None)
         #start single batch, ↑ cut warm up, ↓
         for b in range(num_batchs):
-            self.batch_sojourn = [0]*N
-            self.batch_count =[0]*N
-            self.recording_batch = True
+            self.uwc.batch_sojourn = [0]*N
+            self.uwc.batch_count =[0]*N
+            self.uwc.recording_batch = True
 
-            batch_end = self.current_time + batch_length
+            batch_end = self.uwc.sim.current_time + batch_length
             def stop_batch():
                 return self.uwc.current_time >= batch_end
-            self.uwc.sim.run(stop_batch())
+            self.uwc.sim.run(stop_batch)
 
-            self.recording_batch = False
+            self.uwc.recording_batch = False
 
 
-            total_s = sum(self.batch_sojourn)
-            total_c = sum(self.batch_count)
+            total_s = sum(self.uwc.batch_sojourn)
+            total_c = sum(self.uwc.batch_count)
             self.batch_mean.append(total_s / total_c)
 
             for i in range(N):
-                if self.batch_count[i] > 0:
-                    self.batch_district[i].append(self.batch_sojourn[i] / self.batch_count[i])
-
-
-
-
-    def result(self):
-        uwc = self.uwc
+                if self.uwc.batch_count[i] > 0:
+                    self.batch_district[i].append(self.uwc.batch_sojourn[i] / self.uwc.batch_count[i])
 
 
 
 
 
+
+
+
+
+
+def verification_v1():
+    global N, p, q_1, q_2, q_3, mu_3, K, l_1
+    N = 1
+    p = 0
+    q_1, q_2, q_3 = 0, 0, 1  #make sure only type 3
+    l_1 = 0.5
+    mu_3 = 1
+    K = float('inf') #infinity way
+
+
+
+
+
+    theoretical_W = 1/(mu_3-l_1)
+    print(f"v1, theoretical E[W]={theoretical_W}")
+
+    arrival_rates = [l_1]
+    uwc_1 = UWC(N, arrival_rates)
+    steady_state(uwc_1).regenerative()
+
+    W_hat, ci_low, ci_high, res = steady_state(uwc_1).confidence_interval_reg()
+    print(f"simulated E[W]={W_hat}, CI=[{ci_low}, {ci_high}], relative precision={res}")
+
+
+
+
+    if ci_low<=theoretical_W and theoretical_W<=ci_high:
+        print("pass 95% ci")
+    else:
+        print("not 95%")
+
+
+def verification_v2():
+    global N, p, q_1, q_2, q_3, mu_3, K, l_1, l_2
+    N = 2
+    p = 1
+    q_1, q_2,q_3 = 0,0,1
+    l_1 = l_2 = 0.6
+    mu_3 = 1
+    K = float('inf')
+
+    a = (2*0.6)/mu_3
+    C_2_a = (a**2)/(2 + a)
+    E_Wq = C_2_a/(2*mu_3-2*0.6)
+    theoretical_W = E_Wq+(1/mu_3)
+    print(f"v2,C(2,a)={C_2_a},E[W_q]= {E_Wq}, theortical E[W] = {theoretical_W}")
+
+
+    arrival_rates = [l_1, l_2]
+    uwc_2 = UWC(N, arrival_rates)
+    steady_state(uwc_2).regenerative()
+
+    W_hat, ci_low, ci_high, precision = steady_state(uwc_2).confidence_interval_reg()
+    print(f"simulated E[W] = {W_hat}, ci = [{ci_low}, {ci_high}], precision = {precision}")
+
+
+
+    if ci_low <= theoretical_W and theoretical_W <= ci_high:
+        print("pass 95% ci")
+    else:
+        print("not 95%")
+
+
+def result_print(uwc, steady_state, time_simulate):
+    lambdas = uwc.arrival_rate
+    lambda_tot = sum(lambdas)
+    W_hat_tot, W_low_tot, W_high_tot, _ = steady_state.confidence_interval_reg()
+
+
+
+
+
+
+
+
+
+    E_W = []
+    for i in range(uwc.N):
+        #for in sojorn
+        mean_w = uwc.sojourn_stats[i].mean()
+
+        E_W.append(mean_w)
+        local_low = mean_w*(W_low_tot/W_hat_tot)
+        local_high = mean_w * (W_high_tot / W_hat_tot)
+        print(f"waiting time: {i+1} district, E[W] = {mean_w} ,CI= [{local_low}, {local_high}])")
+
+
+    print(f"E[W_tot] = {W_hat_tot}, CI tot =[{W_low_tot}, {W_high_tot}])")
+
+    for i in range(uwc.N):
+        L_i = lambdas[i] * E_W[i]   #little law l=lambda*W
+
+        L_low_i = lambdas[i] * (E_W[i] * (W_low_tot / W_hat_tot))
+        L_high_i = lambdas[i] * (E_W[i] * (W_high_tot / W_hat_tot))
+        print(f"queue length: {i+1} district: L_{i + 1} = {L_i}, CI=[{L_low_i}, {L_high_i}])")
+
+
+    L_tot = lambda_tot * W_hat_tot
+    L_tot_low = lambda_tot * W_low_tot
+    L_tot_high = lambda_tot * W_high_tot
+    print(f"L_tot = {L_tot}, CI tot= [{L_tot_low}, {L_tot_high}])")
+
+
+
+
+    for truck in range(len(uwc.serving_stat)):
+        uti = uwc.serving_stat[truck].mean(time_simulate)
+
+        uti_low=max(0,uti*(W_low_tot/W_hat_tot))
+        uti_high = min(uti * (W_high_tot / W_hat_tot),1)
+        print(f"{truck + 1} truck utilisation: {uti} , CI=[{uti_low}, {uti_high}])")
+
+
+    reroute = uwc.reroute_count.value #counter() is not interger but need value
+
+    rerouting_rate = reroute / time_simulate
+    print(f"num of reroutings ={reroute}, reroute rate = {rerouting_rate}")
+    return W_hat_tot, W_low_tot, W_high_tot
+
+
+def comparison_experiment():
+    global N, K, p, q_1, q_2, q_3, mu_1, mu_2, mu_3, k_1, k_2, l_1, l_2, l_3
+    N = 3
+    K = 5
+    q_1 = q_2 = q_3 = 1/3
+    k_1, mu_1 = 2, 1
+    k_2, mu_2 = 3, 1.5
+    mu_3 = 1
+    l_1 = l_2 = l_3 = 0.4
+    arrival_rates = [l_1, l_2, l_3]
+    random.seed(42)
+    np.random.seed(42)
+
+
+    p = 0.5
+    uwc_1 = UWC(N, arrival_rates)
+    steady_state(uwc_1).regenerative()
+    w_1, low_1, high_1 = result_print(uwc_1, steady_state(uwc_1), uwc_1.cycle_start)
+
+    p = 0.51
+    uwc_2 = UWC(N, arrival_rates)
+    steady_state(uwc_2).regenerative()
+    w_2, low_2, high_2 = result_print(uwc_2, steady_state(uwc_2), uwc_2.cycle_start)
+
+    print(f"friendliness p=0.50: E[W]={w_1}, CI=[{low_1}, {high_1}], p=0.51: E[W]={w_2}, CI=[{low_2}, {high_2}]")
+
+    if high_1 < low_2 or high_2 < low_1:
+        print("ci no overlap")
+    else:
+        print("ci overlap")
+
+
+if __name__ == "__main__":
+    verification_v1()
+    verification_v2()
+    comparison_experiment()
 
 
 
