@@ -180,10 +180,11 @@ class UWC:
         self.truck_task[truck] = None
         self.truck_depart[truck] = None
 
+        self.reroute_count.increment()
         self.routing(truck, current_time)
 
-        self.reroute_count.increment()
         #increment reroute_count
+
     
     def service(self,truck, district,current_time):
         current_task = self.queues[district].pop(0)
@@ -308,7 +309,7 @@ class Rerouting_Event(Event):
 class steady_state:
     def __init__(self,uwc):
         self.uwc = uwc
-        self.batch_mean = []  # one overall batch mean per batch
+        self.batch_mean_list = []  # one overall batch mean per batch
         self.batch_district = [[] for _ in range(N)]
     #Regenerative method/Batch means method
 
@@ -350,7 +351,7 @@ class steady_state:
             if not self.uwc._new_cycle:
                 return False
             self.uwc._new_cycle = False
-            min_cycles = 10
+            min_cycles = 100
             max_cycles = 1000
             n = len(self.uwc.reg_cycles)
             if n < min_cycles:
@@ -376,35 +377,43 @@ class steady_state:
 
     def confidence_interval_batch(self, r):
         n = len(r)
-        L_bar = sum(r) / n
+        if n ==0:
+            return 0,0,0
+        if n==1:
+            return r[0], r[0], r[0]
+        L_bar = sum(r) / n #division by zero
         r_var = sum((x - L_bar) ** 2 for x in r) / (n - 1)
         ci = self.critical_t(n - 1) * ((r_var/n)**0.5)
         return L_bar, L_bar - ci, L_bar + ci
 
 
     def batch_mean(self):
-        cycles = self.uwc.reg_cycles
-        mean_cycle =sum(c["length"] for c in cycles)/len(cycles)
+        #cycles = self.uwc.reg_cycles
+        #if cycles:
+        #    mean_cycle =sum(c["length"] for c in cycles)/len(cycles)
+        #else:
+        #    mean_cycle = 10
 
         #batch_length = mean
         #num_batchs = len(cycles) / batch_length
-        num_batchs = 10 #idk but try
-        warm_up = mean_cycle
-        batch_length = mean_cycle *num_batchs
-        warmup_end = self.uwc.current_time + warm_up
+        num_batchs = 30 #idk but try, can modify/ try 30
+        warm_up = 50
+        #batch_length = mean_cycle *num_batchs
+        batch_length = 200   #4*warmup
+        warmup_end = self.uwc.sim.current_time + warm_up
         #stop condition
-        def stop_warm():
-            return self.uwc.current_time >= warmup_end
+        def stop_warm(instance=None):
+            return self.uwc.sim.current_time >= warmup_end
         self.uwc.sim.run(stop_warm)   #def run(self, stop_condition: Optional[Callable[["Simulation"], bool]] = None)
         #start single batch, ↑ cut warm up, ↓
         for b in range(num_batchs):
-            self.uwc.batch_sojourn = [0]*N
-            self.uwc.batch_count =[0]*N
+            self.uwc.batch_sojourn = [0]*self.uwc.N
+            self.uwc.batch_count =[0]*self.uwc.N
             self.uwc.recording_batch = True
 
             batch_end = self.uwc.sim.current_time + batch_length
-            def stop_batch():
-                return self.uwc.current_time >= batch_end
+            def stop_batch(instance=None, end = batch_end):
+                return self.uwc.sim.current_time >= end
             self.uwc.sim.run(stop_batch)
 
             self.uwc.recording_batch = False
@@ -412,9 +421,10 @@ class steady_state:
 
             total_s = sum(self.uwc.batch_sojourn)
             total_c = sum(self.uwc.batch_count)
-            self.batch_mean.append(total_s / total_c)
+            if total_c>0:
+                self.batch_mean_list.append(total_s / total_c)
 
-            for i in range(N):
+            for i in range(self.uwc.N):
                 if self.uwc.batch_count[i] > 0:
                     self.batch_district[i].append(self.uwc.batch_sojourn[i] / self.uwc.batch_count[i])
 
@@ -436,20 +446,18 @@ def verification_v1():
     mu_3 = 1
     K = float('inf') #infinity way
 
-
-
-
-
     theoretical_W = 1/(mu_3-l_1)
     print(f"v1, theoretical E[W]={theoretical_W}")
 
-    arrival_rates = [l_1]
+    arrival_rates = [l_1] #reg
     uwc_1 = UWC(N, arrival_rates)
-    steady_state(uwc_1).regenerative()
 
-    W_hat, ci_low, ci_high, res = steady_state(uwc_1).confidence_interval_reg()
-    print(f"simulated E[W]={W_hat}, CI=[{ci_low}, {ci_high}], relative precision={res}")
+    ss_1 = steady_state(uwc_1)
+    ss_1.regenerative()
 
+    reg_time = uwc_1.sim.current_time
+    W_hat, ci_low, ci_high, res = ss_1.confidence_interval_reg()
+    print(f"regenerative: simulated E[W]={W_hat}, CI=[{ci_low}, {ci_high}], relative precision={res}")
 
 
 
@@ -457,6 +465,19 @@ def verification_v1():
         print("pass 95% ci")
     else:
         print("not 95%")
+
+    #bm
+    ss_1.batch_mean()
+    bm_time = uwc_1.sim.current_time
+    W_hat_b, ci_low_b, ci_high_b = steady_state(uwc_1).confidence_interval_batch(ss_1.batch_mean_list)
+    print(f"batch mean: simulated E[W] = {W_hat_b}, CI = [{ci_low_b}, {ci_high_b}]")
+    if ci_low_b <= theoretical_W and theoretical_W <= ci_high_b:
+        print("pass 95% ci")
+    else:
+        print("not 95%")
+
+    reroute = uwc_1.reroute_count.value
+    print(f"{reroute}")
 
 
 def verification_v2():
@@ -477,9 +498,10 @@ def verification_v2():
 
     arrival_rates = [l_1, l_2]
     uwc_2 = UWC(N, arrival_rates)
-    steady_state(uwc_2).regenerative()
+    ss_2 = steady_state(uwc_2)
+    ss_2.regenerative()
 
-    W_hat, ci_low, ci_high, precision = steady_state(uwc_2).confidence_interval_reg()
+    W_hat, ci_low, ci_high, precision = ss_2.confidence_interval_reg()
     print(f"simulated E[W] = {W_hat}, ci = [{ci_low}, {ci_high}], precision = {precision}")
 
 
@@ -490,7 +512,23 @@ def verification_v2():
         print("not 95%")
 
 
-def result_print(uwc, steady_state, time_simulate):
+
+    #bm
+    ss_2.batch_mean()
+    bm_time = uwc_2.sim.current_time
+    W_hat_b, ci_low_b, ci_high_b = steady_state(uwc_2).confidence_interval_batch(ss_2.batch_mean_list)
+    print(f"batch mean: simulated E[W] = {W_hat_b}, CI = [{ci_low_b}, {ci_high_b}]")
+    if ci_low_b <= theoretical_W and theoretical_W <= ci_high_b:
+        print("pass 95% ci")
+    else:
+        print("not 95%")
+
+    reroute = uwc_2.reroute_count.value
+    print(f"{reroute}")
+
+
+def result_print_reg(uwc, steady_state, time_simulate):
+    print("reg")
     lambdas = uwc.arrival_rate
     lambda_tot = sum(lambdas)
     W_hat_tot, W_low_tot, W_high_tot, _ = steady_state.confidence_interval_reg()
@@ -511,23 +549,23 @@ def result_print(uwc, steady_state, time_simulate):
         E_W.append(mean_w)
         local_low = mean_w*(W_low_tot/W_hat_tot)
         local_high = mean_w * (W_high_tot / W_hat_tot)
-        print(f"waiting time: {i+1} district, E[W] = {mean_w} ,CI= [{local_low}, {local_high}])")
+        print(f"Regenerative: waiting time: {i+1} district, E[W] = {mean_w} ,CI= [{local_low}, {local_high}])")
 
 
-    print(f"E[W_tot] = {W_hat_tot}, CI tot =[{W_low_tot}, {W_high_tot}])")
+    print(f"reg E[W_tot] = {W_hat_tot}, CI tot =[{W_low_tot}, {W_high_tot}])")
 
     for i in range(uwc.N):
         L_i = lambdas[i] * E_W[i]   #little law l=lambda*W
 
         L_low_i = lambdas[i] * (E_W[i] * (W_low_tot / W_hat_tot))
         L_high_i = lambdas[i] * (E_W[i] * (W_high_tot / W_hat_tot))
-        print(f"queue length: {i+1} district: L_{i + 1} = {L_i}, CI=[{L_low_i}, {L_high_i}])")
+        print(f"reg queue length: {i+1} district: L_{i + 1} = {L_i}, CI=[{L_low_i}, {L_high_i}])")
 
 
     L_tot = lambda_tot * W_hat_tot
     L_tot_low = lambda_tot * W_low_tot
     L_tot_high = lambda_tot * W_high_tot
-    print(f"L_tot = {L_tot}, CI tot= [{L_tot_low}, {L_tot_high}])")
+    print(f"reg L_tot = {L_tot}, CI tot= [{L_tot_low}, {L_tot_high}])")
 
 
 
@@ -537,14 +575,80 @@ def result_print(uwc, steady_state, time_simulate):
 
         uti_low=max(0,uti*(W_low_tot/W_hat_tot))
         uti_high = min(uti * (W_high_tot / W_hat_tot),1)
-        print(f"{truck + 1} truck utilisation: {uti} , CI=[{uti_low}, {uti_high}])")
+        print(f"reg {truck + 1} truck utilisation: {uti} , CI=[{uti_low}, {uti_high}])")
 
 
     reroute = uwc.reroute_count.value #counter() is not interger but need value
 
     rerouting_rate = reroute / time_simulate
-    print(f"num of reroutings ={reroute}, reroute rate = {rerouting_rate}")
+    print(f"reg num of reroutings ={reroute}, reroute rate = {rerouting_rate}")
     return W_hat_tot, W_low_tot, W_high_tot
+
+def result_print_bm(uwc, ss, time_simulate):
+    print("bm")
+    lambdas = uwc.arrival_rate
+    lambda_tot = sum(lambdas)
+    W_hat_tot, W_low_tot, W_high_tot = ss.confidence_interval_batch(ss.batch_mean_list)
+
+    if W_hat_tot ==0:
+        print("empty")
+        return  W_hat_tot, W_low_tot,W_high_tot
+
+    E_W = []
+    for i in range(uwc.N):
+        #for in sojorn
+        if len(ss.batch_district[i]) != 0:
+            mean_w = sum(ss.batch_district[i]) / len(ss.batch_district[i])
+        else:
+            mean_w =0
+
+        E_W.append(mean_w)
+        if W_hat_tot !=0:
+            local_low = mean_w*(W_low_tot/W_hat_tot)
+            local_high = mean_w * (W_high_tot / W_hat_tot)
+        else:
+            local_low, local_high = 0,0
+        print(f"Batch mean : waiting time: {i+1} district, E[W] = {mean_w} ,CI= [{local_low}, {local_high}])")
+
+
+    print(f"bm E[W_tot] = {W_hat_tot}, CI tot =[{W_low_tot}, {W_high_tot}])")
+
+    for i in range(uwc.N):
+        L_i = lambdas[i] * E_W[i]   #little law l=lambda*W
+        if W_hat_tot != 0:
+
+            L_low_i = lambdas[i] * (E_W[i] * (W_low_tot / W_hat_tot))
+            L_high_i = lambdas[i] * (E_W[i] * (W_high_tot / W_hat_tot))
+        else:
+            L_low_i, L_high_i = 0,0
+        print(f"bm queue length: {i+1} district: L_{i + 1} = {L_i}, CI=[{L_low_i}, {L_high_i}])")
+
+
+    L_tot = lambda_tot * W_hat_tot
+    L_tot_low = lambda_tot * W_low_tot
+    L_tot_high = lambda_tot * W_high_tot
+    print(f"bm L_tot = {L_tot}, CI tot= [{L_tot_low}, {L_tot_high}])")
+
+
+
+
+    for truck in range(len(uwc.serving_stat)):
+        uti = uwc.serving_stat[truck].mean(time_simulate)
+        if W_hat_tot !=0:
+
+            uti_low=max(0,uti*(W_low_tot/W_hat_tot))
+            uti_high = min(uti * (W_high_tot / W_hat_tot),1)
+        else:
+            uti_low, uti_high = 0,0
+        print(f"bm {truck + 1} truck utilisation: {uti} , CI=[{uti_low}, {uti_high}])")
+
+
+    reroute = uwc.reroute_count.value #counter() is not interger but need value
+
+    rerouting_rate = reroute / time_simulate
+    print(f"bm num of reroutings ={reroute}, reroute rate = {rerouting_rate}")
+    return W_hat_tot, W_low_tot, W_high_tot
+
 
 
 def comparison_experiment():
@@ -563,16 +667,32 @@ def comparison_experiment():
 
     p = 0.5
     uwc_1 = UWC(N, arrival_rates)
-    steady_state(uwc_1).regenerative()
-    w_1, low_1, high_1 = result_print(uwc_1, steady_state(uwc_1), uwc_1.cycle_start)
+    ss_1 = steady_state(uwc_1)
+
+
+
+    ss_1.regenerative()
+    reg_time_1 = uwc_1.sim.current_time
+    w_1, low_1, high_1 = result_print_reg(uwc_1, ss_1, reg_time_1)
+
+    ss_1.batch_mean()
+    bm_time_1= uwc_1.sim.current_time
+    w_1_b, low_1_b, high_1_b = result_print_bm(uwc_1, ss_1, bm_time_1)
 
     p = 0.51
     uwc_2 = UWC(N, arrival_rates)
-    steady_state(uwc_2).regenerative()
-    w_2, low_2, high_2 = result_print(uwc_2, steady_state(uwc_2), uwc_2.cycle_start)
+    ss_2 =steady_state(uwc_2)
 
-    print(f"friendliness p=0.50: E[W]={w_1}, CI=[{low_1}, {high_1}], p=0.51: E[W]={w_2}, CI=[{low_2}, {high_2}]")
+    ss_2.regenerative()
+    reg_time_2 = uwc_2.sim.current_time
+    w_2, low_2, high_2 = result_print_reg(uwc_2, ss_2, reg_time_2)
 
+    ss_2.batch_mean()
+    bm_time_2 = uwc_2.sim.current_time
+    w_2_b, low_2_b, high_2_b = result_print_bm(uwc_2, ss_2, bm_time_2)
+
+    print(f"reg friendliness p=0.50: E[W]={w_1}, CI=[{low_1}, {high_1}], p=0.51: E[W]={w_2}, CI=[{low_2}, {high_2}]")
+    print(f"bm friendliness p=0.50: E[W]={w_1_b}, CI=[{low_1_b}, {high_1_b}], p=0.51: E[W]={w_2_b}, CI=[{low_2_b}, {high_2_b}]")
     if high_1 < low_2 or high_2 < low_1:
         print("ci no overlap")
     else:
