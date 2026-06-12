@@ -7,35 +7,98 @@ from core import Simulation, Event
 from statistics import TimeWeightedStatistic, SampleStatistic, Counter, _t_critical
 from distributions import Exponential, Erlang
 
-def
+office_start = 8.0  # 08:00
+office_end = 16.0  # 16:00
 
-class CT:
-    def __init__(self):
-        office_start = 8.0  # 08:00
-        office_end = 16.0  # 16:00
+weekday_count = 5  # mon–fri
+day = time%24
+week = day%7
 
-        weekday_count = 5  # mon–fri
-        day = time\24
-        week = day\7
+queue_emergency = []  # with prioity
+queue_normal = []
+queue_scheduled = []  # draw this  from index0 to normal
+# scheduled =(0,1,0,...)
+
+slots_per_hour_morning = 4
+slots_per_hour_afternoon = 3
+waiting_room_capacity = 3
+
+lambda_e = 1
+lambda_i = (21 + 6) / 24
+lambda_op_request = 23 /8  # for service is 23/8
+
+mu =  # service rate
+
+slots_morning = 4
+slots_afternoon = 3
+
+chair_limit = 3
+
+emergency = "emergency"
+inpatient = "inpatient"
+outpatient = "outpatient"
+
+sc1 = 0  # index/ maybe not hard coded  original scanner_x
+sc2 = 1
+num_scanners = 2
 
 
-        queue_emergency = [] #with prioity
-        queue_normal = []
-        queue_scheduled = []#draw this  from index0 to normal
 
-        slots_per_hour_morning = 4
-        slots_per_hour_afternoon = 3
-        waiting_room_capacity = 3
+def day_number(t):
+    return int(t/24)
 
-        lambda_emergency =
-        lambda_inpatient =
-        lambda_op_request =
+def day_of_week(t):
+    return int(t/24)%7
 
-        mu =  #service rate
+def weekday_check(t):
+    if day_of_week(t) < 5:
+        return True
+    else:
+        return False
 
-        scanner_1 = 0  # index/ maybe not hard coded
-        scanner_2 = 1
-        num_scanners = 2
+def is_office_hours(t):
+    if not weekday_check(t):
+        return False
+    h = t % 24
+    return office_start <= h < office_end
+
+def next_oh_start(t):
+    d = int(t / 24)
+    h = t % 24
+    if d%7 < 5:
+        if h < office_start:
+            return d*24 + office_start
+        if h < office_end:
+            return t
+    d = d+1
+    for i in range(10):
+        if d%7 < 5:
+            return d*24 + office_start
+        d = d + 1
+    return
+
+def next_period_boundary(t):
+    d = int(t/24)
+    h = t % 24
+    dow = d % 7
+    if dow < 5:
+        if h < office_start:
+            return d * 24 + office_start
+        elif h < office_end:
+            return d * 24 + office_end
+        else:
+            return (d + 1) * 24
+    else:
+        days_to_monday = 7 - dow
+        return (d + days_to_monday) * 24
+    
+
+def lambda_I(time):
+
+
+
+
+
 
 class Arrival:
     def __init__():
