@@ -94,32 +94,37 @@ def next_period_boundary(t):
     
 
 def lambda_I(time):
-
+    if not weekday_check(t):
+        return 0.375
+    h = time %24
+    if 9.0 <= h < 12.0:
+        return 0.375+1.5*math.pi*math.sin(math.pi*(h-9.0)/3.0)
+    elif 12.0 <= h < 15.0:
+        return 0.375+1.5*math.pi*math.sin(math.pi*(h-12.0)/3.0)
+    return 0.375
 
 
 
 
 
 class Arrival:
-    def __init__():
-        self.time = #9.5 = 9:30 in minutes
+    def __init__(self):
+        self.patient = 0
+        self.queue_emergency = []
+        self.queue_normal = []
+        self.waiting_list = []
 
-        day = time\24
-        week = day\7
-
-        queue_emergency = [] #with prioity
-        queue_normal = []
-        queue_scheduled = []#draw this  from index0 to normal
-
-        waiting_
+    def next_id(self):
+        self.patient += 1
+        return self.patient
 
 
-    def eme_arrival(self):
+    def eme_arrival(self,t,sim):
 
-        emergency_arrive(t):
+        #emergency_arrive(t):
 
 
-        schedule emergency_arrive t + exponential(lambda_emergency)
+        #schedule emergency_arrive t + exponential(lambda_emergency)
 
         p = new patient
         p.type = "emergency"
@@ -128,23 +133,28 @@ class Arrival:
         p.arrival_time = t
         p.outside_room = false
 
-
-        k = find_free_scanner()
-
+        k = sim.find_free_scanner()
         if k != -1:
-
-            dispatch_to_scanner(k, p, t)
-
-            if warmup_done:
-                wait_times_e.append(0.0)
-                overflow_flags.append(0)
+            sim.dispatch_to_scanner(k, p, t)
+            if sim.warmup_done:
+                sim.wait_times_e.append(0.0)
+                sim.overflow_flags.append(0)
         else:
-            #in queue p,t
+
+            if (len(self.queue_emergency) + len(self.queue_normal)) >= chair_limit:
+                p.outside_room = True
+                if sim.warmup_done:
+                    sim.overflow_flags.append(1)
+            else:
+                if sim.warmup_done:
+                    sim.overflow_flags.append(0)
+
+            self.queue_emergency.append(p)
 
 
-    def inp_arrival(time,)
+    def inp_arrival(self,t,sim)
 
-        schedule inpatient_arrive at + exponential(lambda_inpatient)
+        #schedule inpatient_arrive at + exponential(lambda_inpatient)
 
         p = new patient
         p.type = "inpatient"
@@ -155,25 +165,27 @@ class Arrival:
         p.request_during_oh = is_office_hours(t)?
         p.scanned_after_1600 = false
 
-        k = find_free_scanner()
-
+        k = sim.find_free_scanner()
         if k != -1:
-            dispatch_to_scanner(k, p, t)
-            if warmup_done and p.request_during_oh:
-                pm5_flags.append(0)
+            sim.dispatch_to_scanner(k, p, t)
+            if sim.warmup_done and p.request_during_oh:
+                sim.pm5_flags.append(0)  # Met timeline target
         else:
-            enqueue_patient(p, t)
-        if time >9 and time < 15:
+            if (len(self.queue_emergency) + len(self.queue_normal)) >= chair_limit:
+                p.outside_room = True
+                if sim.warmup_done:
+                    sim.overflow_flags.append(1)
+            else:
+                if sim.warmup_done:
+                    sim.overflow_flags.append(0)
 
-            lam_t = sin()time
-
-        lam_t = lam_i
+            self.queue_normal.append(p)
 
 
-    def op_arrival(self):
-        op_request_arrive(t):
+    def op_arrival(self,t,sim):
+        #op_request_arrive(t):
 
-        schedule op_request_arrive at t+exponential(lambda_op_request)
+        #schedule op_request_arrive at t+exponential(lambda_op_request)
 
         p = new patient
         p.type = "outpatient"
@@ -183,22 +195,31 @@ class Arrival:
         p.arrival_time = none
         p.outside_room = false
 
-        earliest_day = p.request_day + 1
+        earliest_day = p.request_day+ 1
+        this_friday = p.request_day+(4-day_of_week(t))
 
-        slot = find_earliest_slot(earliest_day)
-
-        if slot != none:
-            (day, hour, slot_idx) = slot
-            appointment_t = book_slot(day, hour, slot_idx, p)
-
-            schedule op_appointment(p) appointment_t
+        if earliest_day <= this_friday:
+            monday_this_week = p.request_day-day_of_week(t)
+            self.allocate_weekly_slots(monday_this_week)
+            slot = self.find_earliest_slot(earliest_day, this_friday)
         else:
-            waiting_list.append(p)
+            slot = None
+
+        if slot is not None:
+            d, hour, slot_idx = slot
+            self.slot_table[(d, hour, slot_idx)] = p.patient_id
+
+            p.appt_day = d
+            p.appt_time= d * 24+hour+slot_idx/slots_per_hour
+            if random.random() <= 0.84:
+                sim.schedule_event(p['appt_time'], "OP_ARRIVE", p)
+        else:
+            self.waiting_list.append(p)
 
 
 
-K = 3
-len(queue_emergency)+len(queue_normal) >K:
+#K = 3
+#len(queue_emergency)+len(queue_normal) >K:
 
-count inpatients in the office hour
-count_ioh=0
+#count inpatients in the office hour
+#count_ioh=0
