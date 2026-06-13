@@ -24,10 +24,14 @@ slots_per_hour_afternoon = 3
 waiting_room_capacity = 3
 
 lambda_e = 1
-lambda_i = (21 + 6) / 24
-lambda_op_request = 23 /8  # for service is 23/8
+lambda_i_base = 0.375
+lambda_i_amplitude = 1.5 * math.pi
+lambda_i_max = lambda_i_base + lambda_i_amplitude
+lambda_o = 2.875
+p_show = 0.84
 
-mu =  # service rate
+
+mu = 4 #service rate
 
 slots_morning = 4
 slots_afternoon = 3
@@ -223,3 +227,41 @@ class Arrival:
 
 #count inpatients in the office hour
 #count_ioh=0
+
+
+class Scanning:
+    def __init__(self):
+        self.fel = []
+
+
+def schedule_event(fel, event_time, event_type, data):
+    new_event = [event_time, event_type, data]
+    for i in range(len(fel)):
+        if fel[i][0] > event_time:
+            fel.insert(i, new_event)
+            return
+    fel.append(new_event)
+
+
+def run_simulation(t_hours):
+    sim = Scanning()
+    schedule_event(sim.fel, random.expovariate(lambda_e), #emergency)
+    schedule_event(sim.fel, t_hours, #end)
+
+    while len(sim.fel) > 0:
+        ev_time, ev_type, ev_data =sim.fel.pop(0)
+        sim.clock = ev_time
+
+        if ev_type == #eme:
+            schedule_event(sim.fel, sim.clock + random.expovariate(lambda_e), #eme)
+        elif ev_type == #end:
+            break
+    return sim
+
+
+def main():
+    sim = run_simulation()
+
+
+if __name__ == "__main__":
+    main()
