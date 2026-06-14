@@ -362,6 +362,32 @@ class Scanning:
         self.slot_table = {}
 
 
+        self.batch_busy_oh = [0, 0]
+        self.batch_busy_noh = [0, 0]
+        self.batch_oh_dur = 0
+        self.batch_noh_dur = 0
+
+        self.period_t = 0
+
+        self.b_sc1_oh = []
+        self.b_sc2_oh = []
+        self.b_sc1_noh = []
+
+        self.b_op_acc = []
+        self.b_em_wait = []
+        self.b_op_wait = []
+        self.b_ovfl = []
+        self.b_pm5 = []
+
+        self.cur_op_acc = []
+        self.cur_em_wait = []
+        self.cur_op_wait = []
+        self.cur_ovfl = []
+        self.cur_pm5 = []
+
+
+
+
 
 def period_update(sim, time):
     t = sim.period_t
@@ -569,11 +595,25 @@ def schedule(future_list, event_time, event_type, data=None):
             return
     future_list.append(event)
 
-def scan_finish(sim):
 
+def scan_finish(sim, scanner):
+    t = sim.t
+    patient = sim.sc_patient[scanner]
 
+    patient['svc_end'] = t
 
+    if sim.warmup_done and sim.sc_busy_since[scanner] is not None:
 
+        busy(sim, scanner, sim.sc_busy_since[scanner], t)
+
+    sim.sc_busy[scanner] = False
+    sim.sc_patient[scanner] = None
+    sim.sc_busy_since[scanner] = None
+
+    if scanner == sc2 and not sim.sc_available[sc2]:
+        return
+
+    next_scan(sim, scanner)
 
 
 
@@ -581,12 +621,25 @@ def scan_finish(sim):
 
 
 def sc2_open(sim):
+    t = sim.t
+    schedule(sim.future_list, t + 24, "open_sc2")
 
+    if not weekday_check(t):
+        return
+
+    sim.sc_available[sc2] = True
+    if not sim.sc_busy[sc2]:
+
+        next_scan(sim, sc2)
 
 
 def sc2_close(sim):
+    t = sim.t
+    schedule(sim.future_list, t+24, "close_sc2")
 
-
+    if not weekday_check(t):
+        return
+    sim.sc_available[sc2] = False
 
 
 
