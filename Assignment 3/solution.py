@@ -388,7 +388,6 @@ class Scanning:
 
 
 
-
 def period_update(sim, time):
     t = sim.period_t
     while t < time - 1e-12:
