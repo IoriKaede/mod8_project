@@ -6,14 +6,12 @@ import random
 from core import Simulation, Event
 from statistics import TimeWeightedStatistic, SampleStatistic, Counter, _t_critical
 from distributions import Exponential, Erlang
-
 patient_count = 0
 
 random.seed(42)
 
 #office_start = 8.0  # 08:00
 #office_end = 16.0  # 16:00
-
 #weekday_count = 5  # mon–fri
 #day = time%24
 #week = day%7
@@ -69,6 +67,26 @@ pt_o = "outpatient"
 sc1 = 0  # index/ maybe not hard coded  original scanner_x
 sc2 = 1
 num_scanners = 2
+
+def mean(numbers):
+    total = 0
+    for x in numbers:
+        total = total + x
+    return total /len(numbers)  #only because this is more convenient than the des liabray
+
+
+def deviation(numbers):
+    n = len(numbers)
+    if n < 2:
+        return float('nan')
+    m = mean(numbers)
+    sum_sq = 0
+    for x in numbers:
+        sum_sq = sum_sq + (x - m) ** 2
+    return math.sqrt(sum_sq / (n - 1))
+
+
+
 
 
 def schedule(future_list, event_time, event_type, data=None):
@@ -171,7 +189,7 @@ def slots_week(slot_table, mon):
     for day_offset in range(5):
         d = mon + day_offset
 
-        for hour in range(int(office_start), 16):
+        for hour in range(8, 16):
 
             for s in range(slots(hour)):
                 key = (d, hour, s)
@@ -186,7 +204,7 @@ def slot_begin(slot_table, earliest_day, latest_day):
         if d % 7 >= 5:
             continue
 
-        for hour in range(int(office_start), 16):
+        for hour in range(8, 16):
 
             for s in range(slots(hour)):
                 if slot_table.get((d, hour, s)) is None:
@@ -641,6 +659,90 @@ def sc2_close(sim):
     sim.sc_available[sc2] = False
 
 
+def friday_batch(sim):
+    t = sim.t
+    schedule(sim.future_list, t+7*24, "friday")
+
+    monday_next_week = day_number(t) + 3 - week_day(t)
+    slots_week(sim.slot_table, monday_next_week)
+
+    while len(sim.waiting_list) > 0:
+        p = sim.waiting_list[0]
+
+        found = slot_begin(sim.slot_table, monday_next_week, monday_next_week + 4)
+
+        if found is not None:
+            sim.waiting_list.pop(0)
+            d, hour, s = found
+
+            sim.slot_table[(d, hour, s)] = p['pid']
+
+            p['appt_t'] = slot_to_time(d, hour, s)
+            p['appt_day'] = d
+
+            if random.random() <= p_show:
+                schedule(sim.future_list, p['appt_t'], "op_arrival", {'p': p})
+        else:
+            break
+
+
+def warmup(sim):
+    sim.warmup_done = True
+    sim.period_t = sim.t
+
+    for i in range(2):
+
+        if sim.sc_busy[i]:
+            sim.sc_busy_since[i] = sim.t
+
+    schedule(sim.future_list, sim.t + batch_hours, "batch")
+
+
+def batch(sim):
+    period_update(sim, sim.t)
+
+    for i in range(2):
+
+        if sim.sc_busy[i] and sim.sc_busy_since[i] is not None:
+            busy(sim, i, sim.sc_busy_since[i], sim.t)
+
+            sim.sc_busy_since[i] = sim.t
+
+    if sim.batch_oh_dur > 0:
+        sim.b_sc1_oh.append(sim.batch_busy_oh[sc1] / sim.batch_oh_dur)
+        sim.b_sc2_oh.append(sim.batch_busy_oh[sc2] / sim.batch_oh_dur)
+    else:
+        sim.b_sc1_oh.append(0)
+        sim.b_sc2_oh.append(0)
+
+    if sim.batch_noh_dur > 0:
+        sim.b_sc1_noh.append(sim.batch_busy_noh[sc1] / sim.batch_noh_dur)
+    else:
+        sim.b_sc1_noh.append(0)
+
+    sim.b_op_acc.append(mean(sim.cur_op_acc))
+    sim.b_em_wait.append(mean(sim.cur_em_wait))
+    sim.b_op_wait.append(mean(sim.cur_op_wait))
+
+    sim.b_ovfl.append(mean(sim.cur_ovfl))
+
+    sim.b_pm5.append(mean(sim.cur_pm5))
+
+    sim.batch_busy_oh = [0, 0]
+    sim.batch_busy_noh = [0, 0]
+    sim.batch_oh_dur = 0
+    sim.batch_noh_dur = 0
+
+    sim.cur_op_acc = []
+    sim.cur_em_wait = []
+    sim.cur_op_wait = []
+    sim.cur_ovfl = []
+    sim.cur_pm5 = []
+
+    if sim.t+batch_hours<total_hours:
+
+        schedule(sim.future_list, sim.t + batch_hours, "batch")
+
 
 def simulation():
     global patient_count
@@ -649,8 +751,8 @@ def simulation():
     fl = sim.future_list
     schedule(fl, 0, "eme_arrival")
     schedule(fl, next_inp(0), "inp_arrival")
-    schedule(fl,8, "op_call")
-    schedule(fl,8, "open_sc2")
+    schedule(fl, 8, "op_call")
+    schedule(fl, 8, "open_sc2")
     schedule(fl, 16, "close_sc2")
     schedule(fl, 16, "friday")
     schedule(fl, warmup_hours, "warmup")
@@ -667,25 +769,58 @@ def simulation():
         elif ev_type == "op_call":
             op_called(sim)
         elif ev_type == "op_arrival":
-            op_arrive(sim, #data
+            op_arrive(sim, ev_data['p'])
         elif ev_type == "scan":
-            scan_finish(sim, #data
+            scan_finish(sim, ev_data['sc'])
         elif ev_type == "open_sc2":
             sc2_open(sim)
         elif ev_type == "close_sc2":
             sc2_close(sim)
+        elif ev_type == "friday":
+            friday_batch(sim)
+        elif ev_type == "warmup":
+            warmup(sim)
+        elif ev_type == "batch":
+            batch(sim)
         elif ev_type == "endsim":
             break
     return sim
 
 
-
 if __name__ == "__main__":
+
+    def ci_width(data_list):
+        clean = [x for x in data_list if not math.isnan(x)]
+        n = len(clean)
+        m = mean(clean)
+
+        s = 0
+
+        for x in clean:
+            s = s + (x - m) ** 2
+
+        dev =0.5**(s/(n - 1))  # deviation
+        return 2.04523 * (dev /(n**0.5))
+
+
+    def ci(data_list):
+        clean = [x for x in data_list if not math.isnan(x)]
+        m = mean(clean)
+        hw = ci_width(clean)
+
+        l = m-hw
+        u = m+hw
+        return l, u
+
+
+
     def print_res(name, data_list):
         m = mean(data_list)
         hw = ci_width(data_list)
+        l,u = ci(data_list)
         print(name + "_mean:", m)
         print(name + "_ci_half_width:", hw)
+        print(name + "_ci:", f"[{l},{u}]")
 
     sim = simulation()
     print_res("sc1_oh_util", sim.b_sc1_oh)
