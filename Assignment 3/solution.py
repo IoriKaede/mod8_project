@@ -480,7 +480,7 @@ def start_service(sim, patient, wait_hours):
     if type == pt_i and patient['oh_request']:
 
         deadline = patient['oh_req_day'] * 24 + 16
-        if sim.t >= deadline:
+        if sim.t >= deadline: # maybe should be t + expected scan duration? or we just think of starting time?
             missed = 1
         else:
             missed = 0
@@ -799,7 +799,7 @@ if __name__ == "__main__":
         for x in clean:
             s = s + (x - m) ** 2
 
-        dev =0.5**(s/(n - 1))  # deviation
+        dev =math.sqrt(s / (n - 1))  # deviation
         return 2.04523 * (dev /(n**0.5))
 
 
