@@ -20,6 +20,9 @@ random.seed(42)
 lambda_e = 1
 
 
+#lambda_i_base = 0
+#lambda_i_amplitude = 0
+
 
 lambda_i_base = 0.375
 lambda_i_amplitude = 1.5 * math.pi
@@ -36,10 +39,11 @@ def lambda_i(time):
     return lambda_i_base
 
 lambda_o = 2.875
+#lambda_o = 0
 p_show = 0.84
 
 
-mu = 4 #service rate
+mu = 4.138 #service rate
 
 slots_morning = 4
 slots_afternoon = 3
@@ -54,8 +58,8 @@ def slots(hour):
 
 chair_limit = 3
 
-warmup_hours = 4*7*24
-total_hours = 52*7*24
+warmup_hours = 50*7*24
+total_hours = 200*7*24  #add weeks to improve precision
 data_hours = total_hours-warmup_hours
 n_batches = 30
 batch_hours = data_hours/n_batches
@@ -310,7 +314,7 @@ def patient_new(type, t):
 #        if k != -1:
 #            sim.dispatch_to_scanner(k, p, t)
 #            if sim.warmup_done and p.request_during_oh:
-#                sim.pm5_flags.append(0)  # Met timeline target
+#                sim.inp_rate_flags.append(0)  # Met timeline target
 #        else:
 #            if (len(self.queue_emergency) + len(self.queue_normal)) >= chair_limit:
 #                p.outside_room = True
@@ -386,22 +390,26 @@ class Scanning:
         self.batch_noh_dur = 0
 
         self.period_t = 0
-
+        # self.sc1_oh_util = SampleStatistic()
+        # self.sc2_oh_util = SampleStatistic()
+        # self.sc1_noh_util = SampleStatistic()
         self.b_sc1_oh = []
         self.b_sc2_oh = []
         self.b_sc1_noh = []
-
+        
+        #self.b_op_acc = SampleStatistic()
         self.b_op_acc = []
         self.b_em_wait = []
         self.b_op_wait = []
         self.b_ovfl = []
-        self.b_pm5 = []
+        self.b_inp_rate = []
 
-        self.cur_op_acc = []
+        
+        self.cur_op_acc = [] #SampleStatistic()
         self.cur_em_wait = []
         self.cur_op_wait = []
         self.cur_ovfl = []
-        self.cur_pm5 = []
+        self.cur_inp_rate = []
 
 
 
@@ -412,14 +420,14 @@ def period_update(sim, time):
 
         boundary = next_loop(t)
 
-        nxt = min(boundary, time)
-        dt = nxt - t
+        next = min(boundary, time)
+        dt = next - t
         if is_office_hours(t):
 
             sim.batch_oh_dur += dt
         else:
             sim.batch_noh_dur += dt
-        t = nxt
+        t = next
     sim.period_t = time
 
 
@@ -428,15 +436,15 @@ def busy(sim, sc_idx, from_t, to_t):
     while t < to_t - 1e-12:
 
         boundary = next_loop(t)
-        nxt = min(boundary, to_t)
-        dt = nxt - t
+        next = min(boundary, to_t)
+        dt = next - t
 
         if is_office_hours(t):
             sim.batch_busy_oh[sc_idx] += dt
 
         else:
             sim.batch_busy_noh[sc_idx] += dt
-        t = nxt
+        t = next
 
 
 def freesc(sim):
@@ -449,7 +457,7 @@ def freesc(sim):
 
 
 def start_scan(sim, sc_idx, patient):
-    duration = random.expovariate(mu) #exvar
+    duration = random.uniform(10, 19) / 60 # in main project/ change to minutes
     sim.sc_busy[sc_idx] = True
 
     sim.sc_patient[sc_idx] = patient
@@ -482,9 +490,12 @@ def start_service(sim, patient, wait_hours):
         deadline = patient['oh_req_day'] * 24 + 16
         if sim.t >= deadline: # maybe should be t + expected scan duration? or we just think of starting time?
             missed = 1
+            #missed.increment() need counter()
         else:
             missed = 0
-        sim.cur_pm5.append(missed)
+        sim.cur_inp_rate.append(missed)
+        #sim.inp_rate_total += 1
+        #sim.inp_rate_miss += missed
 
 
 def next_scan(sim, sc_idx):
@@ -524,6 +535,21 @@ def next_inp(t):
         if random.random() <= lambda_i(t) / lambda_i_max:
             return t
 
+#class Emergency(Event):
+#    def execute(self, sim):
+#        ct = sim.ct
+#        t = sim.current_time
+#        sim.schedule(EmergencyArrival(t + random.expovariate(ct.lambda_e)))
+
+#  #      p = patient_new(ct, pt_e, t)
+
+#        sc = find_free_scanner(ct)
+#        if sc is not None:
+#            service_start(sim, p, 0.0)
+#            start_scan(sim, sc, p)
+#        else:
+#            set to queue(ct, p)
+
 
 def eme_arrive(sim):
     t = sim.t
@@ -550,7 +576,7 @@ def inp_arrive(sim):
         start_service(sim, patient, wait_hours=0)
         start_scan(sim, sc, patient)
     else:
-        update_queue(sim, patient)
+        update_queue(sim, patient)  #forget to send
 
 
 def op_called(sim):
@@ -663,7 +689,7 @@ def friday_batch(sim):
     t = sim.t
     schedule(sim.future_list, t+7*24, "friday")
 
-    monday_next_week = day_number(t) + 3 - week_day(t)
+    monday_next_week = day_number(t) + 3 #date fix
     slots_week(sim.slot_table, monday_next_week)
 
     while len(sim.waiting_list) > 0:
@@ -726,7 +752,7 @@ def batch(sim):
 
     sim.b_ovfl.append(mean(sim.cur_ovfl))
 
-    sim.b_pm5.append(mean(sim.cur_pm5))
+    sim.b_inp_rate.append(mean(sim.cur_inp_rate))
 
     sim.batch_busy_oh = [0, 0]
     sim.batch_busy_noh = [0, 0]
@@ -737,7 +763,7 @@ def batch(sim):
     sim.cur_em_wait = []
     sim.cur_op_wait = []
     sim.cur_ovfl = []
-    sim.cur_pm5 = []
+    sim.cur_inp_rate = []  #for missing ddl
 
     if sim.t+batch_hours<total_hours:
 
@@ -754,7 +780,7 @@ def simulation():
     schedule(fl, 8, "op_call")
     schedule(fl, 8, "open_sc2")
     schedule(fl, 16, "close_sc2")
-    schedule(fl, 16, "friday")
+    schedule(fl, next_friday(0), "friday") #time fix
     schedule(fl, warmup_hours, "warmup")
     schedule(fl, total_hours, "endsim")
     while len(fl) > 0:
@@ -830,4 +856,4 @@ if __name__ == "__main__":
     print_res("emergency_wait_hours", sim.b_em_wait)
     print_res("outpatient_wait_hours", sim.b_op_wait)
     print_res("overflow_fraction", sim.b_ovfl)
-    print_res("pm5_failure_rate", sim.b_pm5)
+    print_res("inp_rate_failure_rate", sim.b_inp_rate)
